@@ -1,0 +1,78 @@
+version: '3'
+
+includes:
+  common: ../Taskfile.yml
+
+tasks:
+  build:
+    summary: Creates a build of the application for macOS
+    deps:
+      - task: common:go:mod:tidy
+      - task: common:build:frontend
+        vars:
+          PRODUCTION:
+            ref: .PRODUCTION
+    cmds:
+      - go build {{.BUILD_FLAGS}} -o {{.OUTPUT}}
+    vars:
+      BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags production -trimpath -buildvcs=false -ldflags="-w -s"{{else}}-buildvcs=false -gcflags=all="-l"{{end}}'
+      DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
+      OUTPUT: '{{.OUTPUT | default .DEFAULT_OUTPUT}}'
+    env:
+      GOOS: darwin
+      CGO_ENABLED: 1
+      GOARCH: '{{.ARCH | default ARCH}}'
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+      PRODUCTION: '{{.PRODUCTION | default "false"}}'
+
+  build:universal:
+    summary: Builds a macOS universal binary (arm64 + amd64)
+    deps:
+      - task: build
+        vars: { ARCH: amd64, OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-amd64", PRODUCTION: "true" }
+      - task: build
+        vars: { ARCH: arm64, OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-arm64", PRODUCTION: "true" }
+    cmds:
+      - lipo -create -output "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
+      - rm "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
+
+  package:
+    summary: Packages a production build into a `.app` bundle
+    deps:
+      - task: build
+        vars: { PRODUCTION: "true" }
+    cmds:
+      - task: create:app:bundle
+
+  create:app:bundle:
+    summary: Assembles the `.app` bundle (generates a minimal Info.plist)
+    internal: true
+    cmds:
+      - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
+      - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
+      - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS/{{.APP_NAME}}"
+      - |
+        cat > "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist" <<'PLIST'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleName</key><string>Yarc</string>
+          <key>CFBundleExecutable</key><string>yarc</string>
+          <key>CFBundleIdentifier</key><string>com.flash.yarc</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>0.1.0</string>
+          <key>CFBundleVersion</key><string>0.1.0</string>
+          <key>LSMinimumSystemVersion</key><string>12.0</string>
+          <key>NSHighResolutionCapable</key><true/>
+        </dict>
+        </plist>
+        PLIST
+      - codesign --force --deep --sign - "{{.BIN_DIR}}/{{.APP_NAME}}.app"
+
+  run:
+    summary: Builds and runs the application
+    deps:
+      - task: build
+    cmds:
+      - "{{.BIN_DIR}}/{{.APP_NAME}}"

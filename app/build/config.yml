@@ -1,0 +1,46 @@
+# Configuration consumed by `wails3 dev` (and `wails3 update build-assets`).
+# After editing `info`, run `wails3 task common:update:build-assets` to refresh assets.
+version: '3'
+
+# Used to generate platform build assets (Info.plist, manifests, etc.).
+info:
+  companyName: "Flash"
+  productName: "Yarc"
+  productIdentifier: "com.flash.yarc"
+  description: "A fast, local-first API client for REST, GraphQL, WebSocket, and gRPC."
+  copyright: "(c) 2026, Flash"
+  comments: "Local-first API workspace"
+  version: "0.1.0"
+
+# Development mode configuration used by `wails3 dev`.
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend
+      - bin
+      - database
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  executes:
+    - cmd: wails3 build DEV=true
+      type: blocking
+    - cmd: wails3 task common:dev:frontend
+      type: background
+    - cmd: wails3 task run
+      type: primary
+
+fileAssociations: []
+
+other:
+  - name: Yarc

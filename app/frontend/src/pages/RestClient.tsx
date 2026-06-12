@@ -1,0 +1,316 @@
+import Editor from "@monaco-editor/react";
+import { Copy, Download, Play, Save, Square, WandSparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
+import { FormEditor } from "../components/FormEditor";
+import { HeaderTable } from "../components/HeaderTable";
+import { ResponseViewer } from "../components/ResponseViewer";
+import { SnippetPanel } from "../components/SnippetPanel";
+import { streamHttpRequest } from "../services/apiClient";
+import { downloadFile } from "../services/download";
+import { serializeFormBody, upsertHeader } from "../services/formBody";
+import { useWorkspaceStore } from "../store/useWorkspaceStore";
+import type { ApiRequest, ApiResponse, HttpMethod } from "../types/api";
+
+const methods: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+const tabs = ["Params", "Headers", "Auth", "Body", "Tests"] as const;
+type RequestTab = (typeof tabs)[number];
+
+export function RestClient() {
+  const [activeTab, setActiveTab] = useState<RequestTab>("Params");
+  const request = useWorkspaceStore((state) => state.activeRequest);
+  const response = useWorkspaceStore((state) => state.activeResponse);
+  const environments = useWorkspaceStore((state) => state.environments);
+  const activeEnvironmentId = useWorkspaceStore((state) => state.activeEnvironmentId);
+  const updateRequest = useWorkspaceStore((state) => state.updateRequest);
+  const setResponse = useWorkspaceStore((state) => state.setResponse);
+  const addHistory = useWorkspaceStore((state) => state.addHistory);
+  const saveActiveRequest = useWorkspaceStore((state) => state.saveActiveRequest);
+  const persistActiveRequest = useWorkspaceStore((state) => state.persistActiveRequest);
+  const duplicateActiveRequest = useWorkspaceStore((state) => state.duplicateActiveRequest);
+  const isSaved = request.id !== "draft";
+
+  // Auto-save edits to already-saved requests (debounced).
+  useEffect(() => {
+    if (!isSaved) return;
+    const timer = window.setTimeout(() => persistActiveRequest(), 600);
+    return () => window.clearTimeout(timer);
+  }, [request, isSaved, persistActiveRequest]);
+
+  const [sentRequest, setSentRequest] = useState<ApiRequest>();
+  const [loading, setLoading] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const cancel = () => abortRef.current?.abort();
+
+  const run = async () => {
+    const activeEnvironment = environments.find((environment) => environment.id === activeEnvironmentId);
+    let outgoing: ApiRequest = { ...request, environment: activeEnvironment?.variables ?? {} };
+    const form = serializeFormBody(request);
+    if (form) {
+      outgoing = { ...outgoing, body: form.body, headers: upsertHeader(request.headers, "Content-Type", form.contentType) };
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setLoading(true);
+    setSentRequest(outgoing);
+
+    const started = performance.now();
+    let body = "";
+    let statusCode = 0;
+    let status = "Streaming…";
+    let headers: Record<string, string> = {};
+    let resolvedUrl = outgoing.url;
+    let sent: ApiResponse["sent"];
+    const emit = (extra?: Partial<ApiResponse>) =>
+      setResponse({ statusCode, status, headers, body, bodySize: body.length, durationMs: Math.round(performance.now() - started), receivedAt: new Date().toISOString(), resolvedUrl, sent, ...extra });
+
+    const result = await streamHttpRequest(
+      outgoing,
+      {
+        onMeta: (meta) => {
+          statusCode = meta.statusCode;
+          status = meta.status || `${meta.statusCode}`;
+          headers = meta.headers;
+          resolvedUrl = meta.resolvedUrl;
+          sent = meta.sent;
+          emit();
+        },
+        onChunk: (text) => {
+          body += text;
+          emit();
+        },
+      },
+      controller.signal,
+    );
+
+    if (result.error && result.error !== "Aborted") {
+      emit({ status: "Request failed", error: result.error });
+    } else {
+      emit({ status: result.error === "Aborted" ? `${status} (aborted)` : status });
+      const finalResponse: ApiResponse = { statusCode, status, headers, body, bodySize: body.length, durationMs: Math.round(performance.now() - started), receivedAt: new Date().toISOString(), resolvedUrl, sent };
+      addHistory({ id: crypto.randomUUID(), request: outgoing, response: finalResponse, createdAt: new Date().toISOString() });
+    }
+
+    setLoading(false);
+    abortRef.current = null;
+  };
+
+  const downloadResponse = () => {
+    if (!response) return;
+    const contentType = response.headers["Content-Type"] ?? response.headers["content-type"] ?? "text/plain";
+    const extension = contentType.includes("json") ? "json" : contentType.includes("xml") ? "xml" : contentType.includes("html") ? "html" : "txt";
+    downloadFile(`${(request.name || "response").replace(/\s+/g, "-").toLowerCase()}.${extension}`, response.body, contentType);
+  };
+
+  return (
+    <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+      <section className="border-b border-line bg-[#1b2028] p-3">
+        <div className="mb-3 flex items-center gap-2">
+          <input
+            value={request.name}
+            onChange={(event) => updateRequest({ name: event.target.value })}
+            className="h-8 min-w-0 rounded-md border border-transparent bg-transparent px-2 text-sm font-medium text-slate-100 outline-none hover:border-line focus:border-accent focus:bg-[#151a21]"
+            placeholder="Request name"
+          />
+          <span className="text-xs text-slate-600">{isSaved ? "auto-saved" : "unsaved"}</span>
+        </div>
+        <div className="flex gap-2">
+          <select
+            value={request.method}
+            onChange={(event) => updateRequest({ method: event.target.value as HttpMethod })}
+            className="h-10 rounded-md border border-line bg-panel px-3 text-sm font-semibold outline-none focus:border-accent"
+          >
+            {methods.map((method) => (
+              <option key={method}>{method}</option>
+            ))}
+          </select>
+          <input
+            value={request.url}
+            onChange={(event) => updateRequest({ url: event.target.value })}
+            className="h-10 min-w-0 flex-1 rounded-md border border-line bg-[#151a21] px-3 font-mono text-sm outline-none placeholder:text-slate-600 focus:border-accent"
+            placeholder="https://api.example.com/users/{{user_id}}"
+          />
+          {loading ? (
+            <button onClick={cancel} className="flex h-10 items-center gap-2 rounded-md bg-danger px-4 text-sm font-semibold text-ink hover:opacity-90">
+              <Square size={15} />
+              Cancel
+            </button>
+          ) : (
+            <button onClick={() => void run()} className="flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-semibold text-ink hover:bg-[#66e3bf]">
+              <Play size={16} />
+              Send
+            </button>
+          )}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          {tabs.map((label) => (
+            <button key={label} onClick={() => setActiveTab(label)} className={`rounded-md px-3 py-1.5 text-sm ${activeTab === label ? "bg-panel text-accent" : "text-slate-300 hover:bg-panel"}`}>
+              {label} <span className="text-slate-500">{tabCount(label, request)}</span>
+            </button>
+          ))}
+          <div className="ml-auto flex gap-1">
+            <button title="Generate tests with AI" className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-panel hover:text-accent">
+              <WandSparkles size={16} />
+            </button>
+            <button title="Save request" onClick={saveActiveRequest} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-panel hover:text-slate-100">
+              <Save size={16} />
+            </button>
+            <button title="Duplicate request" onClick={duplicateActiveRequest} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-panel hover:text-slate-100">
+              <Copy size={16} />
+            </button>
+            <button title="Download response" onClick={downloadResponse} disabled={!response} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-panel hover:text-slate-100 disabled:opacity-40">
+              <Download size={16} />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <Group orientation="horizontal" className="min-h-0">
+        <Panel defaultSize="58" minSize="30" className="border-r border-line">
+          <Group orientation="vertical" className="h-full">
+            <Panel defaultSize="70" minSize="20">
+              <RequestTabPanel activeTab={activeTab} request={request} updateRequest={updateRequest} />
+            </Panel>
+            <Separator className="h-1 bg-line transition-colors hover:bg-accent/60" />
+            <Panel defaultSize="30" minSize="12">
+              <SnippetPanel />
+            </Panel>
+          </Group>
+        </Panel>
+        <Separator className="w-1 bg-line transition-colors hover:bg-accent/60" />
+        <Panel defaultSize="42" minSize="25">
+          <ResponseViewer response={response} loading={loading && !response} sentRequest={sentRequest} />
+        </Panel>
+      </Group>
+    </div>
+  );
+}
+
+type TabPanelProps = {
+  activeTab: RequestTab;
+  request: ApiRequest;
+  updateRequest: (patch: Partial<ApiRequest>) => void;
+};
+
+function RequestTabPanel({ activeTab, request, updateRequest }: TabPanelProps) {
+  if (activeTab === "Params") {
+    return <HeaderTable title="Query Params" rows={request.queryParams} onChange={(queryParams) => updateRequest({ queryParams })} fill />;
+  }
+
+  if (activeTab === "Headers") {
+    return <HeaderTable title="Headers" rows={request.headers} onChange={(headers) => updateRequest({ headers })} fill />;
+  }
+
+  if (activeTab === "Auth") {
+    return (
+      <div className="h-full min-h-0 overflow-auto p-4">
+        <div className="grid max-w-2xl gap-3">
+          <label className="grid gap-1 text-sm text-slate-400">
+            Type
+            <select value={request.auth.type ?? "none"} onChange={(event) => updateRequest({ auth: { ...request.auth, type: event.target.value } })} className="h-9 rounded-md border border-line bg-panel px-3 text-slate-100 outline-none focus:border-accent">
+              <option value="none">No auth</option>
+              <option value="bearer">Bearer token</option>
+              <option value="basic">Basic auth</option>
+              <option value="apiKey">API key</option>
+            </select>
+          </label>
+          {request.auth.type === "bearer" && (
+            <div className="grid grid-cols-[220px_minmax(0,1fr)] gap-3">
+              <TextField label="Header name" value={request.auth.headerName ?? "Authorization"} onChange={(headerName) => updateRequest({ auth: { ...request.auth, headerName } })} />
+              <TextField label="Token" value={request.auth.token ?? ""} onChange={(token) => updateRequest({ auth: { ...request.auth, token } })} secret />
+            </div>
+          )}
+          {request.auth.type === "basic" && (
+            <div className="grid grid-cols-2 gap-3">
+              <TextField label="Username" value={request.auth.username ?? ""} onChange={(username) => updateRequest({ auth: { ...request.auth, username } })} />
+              <TextField label="Password" value={request.auth.password ?? ""} onChange={(password) => updateRequest({ auth: { ...request.auth, password } })} secret />
+            </div>
+          )}
+          {request.auth.type === "apiKey" && (
+            <div className="grid grid-cols-[1fr_1fr_160px] gap-3">
+              <TextField label="Key" value={request.auth.key ?? ""} onChange={(key) => updateRequest({ auth: { ...request.auth, key } })} />
+              <TextField label="Value" value={request.auth.value ?? ""} onChange={(value) => updateRequest({ auth: { ...request.auth, value } })} secret />
+              <label className="grid gap-1 text-sm text-slate-400">
+                Add to
+                <select value={request.auth.addTo ?? "header"} onChange={(event) => updateRequest({ auth: { ...request.auth, addTo: event.target.value } })} className="h-9 rounded-md border border-line bg-panel px-3 text-slate-100 outline-none focus:border-accent">
+                  <option value="header">Header</option>
+                  <option value="query">Query param</option>
+                </select>
+              </label>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTab === "Tests") {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-10 shrink-0 items-center justify-between border-b border-line px-3 text-sm text-slate-400">
+          <span>Tests</span>
+          <span className="text-xs text-slate-600">JavaScript assertions</span>
+        </div>
+        <div className="relative min-h-0 flex-1">
+          <Editor
+            height="100%"
+            language="javascript"
+            theme="vs-dark"
+            value={request.tests}
+            options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: "on", padding: { top: 12 } }}
+            onChange={(tests) => updateRequest({ tests: tests ?? "" })}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const isForm = request.bodyType === "form" || request.bodyType === "multipart";
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-line px-3 text-sm text-slate-400">
+        <span>Payload</span>
+        <select value={request.bodyType} onChange={(event) => updateRequest({ bodyType: event.target.value as ApiRequest["bodyType"] })} className="h-7 rounded-md border border-line bg-panel px-2 outline-none">
+          <option value="json">JSON</option>
+          <option value="xml">XML</option>
+          <option value="text">Text</option>
+          <option value="form">Form URL Encoded</option>
+          <option value="multipart">Multipart</option>
+        </select>
+      </div>
+      {isForm ? (
+        <FormEditor rows={request.formFields ?? []} allowFiles={request.bodyType === "multipart"} onChange={(formFields) => updateRequest({ formFields })} />
+      ) : (
+        <div className="relative min-h-0 flex-1">
+          <Editor
+            height="100%"
+            language={request.bodyType === "json" ? "json" : request.bodyType === "xml" ? "xml" : "plaintext"}
+            theme="vs-dark"
+            value={request.body}
+            options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: "on", padding: { top: 12 } }}
+            onChange={(body) => updateRequest({ body: body ?? "" })}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TextField({ label, value, onChange, secret = false }: { label: string; value: string; onChange: (value: string) => void; secret?: boolean }) {
+  return (
+    <label className="grid gap-1 text-sm text-slate-400">
+      {label}
+      <input value={value} type={secret ? "password" : "text"} onChange={(event) => onChange(event.target.value)} className="h-9 rounded-md border border-line bg-[#151a21] px-3 text-slate-100 outline-none focus:border-accent" />
+    </label>
+  );
+}
+
+function tabCount(tab: RequestTab, request: ApiRequest) {
+  if (tab === "Params") return request.queryParams.length;
+  if (tab === "Headers") return request.headers.length;
+  if (tab === "Auth") return request.auth.type && request.auth.type !== "none" ? 1 : 0;
+  if (tab === "Body") return request.body ? 1 : 0;
+  return request.tests ? 1 : 0;
+}

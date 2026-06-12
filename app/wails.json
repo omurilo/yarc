@@ -1,0 +1,11 @@
+{
+  "$schema": "https://wails.io/schemas/config.v3.json",
+  "name": "Yarc",
+  "rootpath": ".",
+  "outputfilename": "yarc",
+  "frontend:dir": "frontend",
+  "frontend:install": "yarn install",
+  "frontend:build": "yarn build",
+  "frontend:dev:watcher": "yarn dev",
+  "frontend:dev:serverUrl": "http://localhost:5173"
+}

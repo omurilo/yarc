@@ -1,0 +1,17 @@
+node_modules/
+.DS_Store
+*.tsbuildinfo
+
+app/frontend/dist/
+app/frontend/.vite/
+app/frontend/vite.config.js
+app/frontend/vite.config.d.ts
+app/frontend/bindings/
+app/bin/
+app/database/sqlite/*.db
+app/database/sqlite/*.db-*
+
+/tmp/
+.env
+.env.*
+.task

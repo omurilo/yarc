@@ -1,0 +1,66 @@
+version: '3'
+
+# Cross-platform tasks shared by the per-OS Taskfiles.
+
+tasks:
+  go:mod:tidy:
+    summary: Runs `go mod tidy`
+    internal: true
+    cmds:
+      - go mod tidy
+
+  install:frontend:deps:
+    summary: Installs frontend dependencies
+    dir: frontend
+    sources:
+      - package.json
+      - yarn.lock
+    generates:
+      - node_modules/*
+    preconditions:
+      - sh: yarn --version
+        msg: "Yarn is required. Install it from https://classic.yarnpkg.com/lang/en/docs/install/"
+    cmds:
+      - yarn install
+
+  build:frontend:
+    summary: Builds the frontend bundle into frontend/dist
+    dir: frontend
+    sources:
+      - "**/*"
+      - exclude: node_modules/**/*
+      - exclude: dist/**/*
+    generates:
+      - dist/**/*
+    deps:
+      - task: install:frontend:deps
+      - task: generate:bindings
+    cmds:
+      - yarn build
+
+  generate:bindings:
+    summary: Generates TypeScript bindings for the Go services
+    deps:
+      - task: go:mod:tidy
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - frontend/bindings/**/*
+    cmds:
+      - wails3 generate bindings -clean=true -ts
+
+  dev:frontend:
+    summary: Runs the Vite dev server (used by `wails3 dev`)
+    dir: frontend
+    deps:
+      - task: install:frontend:deps
+    cmds:
+      - yarn dev --port {{.VITE_PORT}}
+
+  update:build-assets:
+    summary: Regenerates platform build assets from build/config.yml
+    dir: build
+    cmds:
+      - wails3 update build-assets -name "{{.APP_NAME}}" -binaryname "{{.APP_NAME}}" -config config.yml -dir .

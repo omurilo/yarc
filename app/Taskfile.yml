@@ -1,0 +1,50 @@
+version: "3"
+
+# Root Taskfile for the Yarc Wails v3 app.
+# Common usage:
+#   task dev      # run in development mode (wails3 dev)
+#   task build    # build the binary into ./bin
+#   task package  # build a distributable bundle for the host OS
+#   task run      # build then run the binary
+
+vars:
+  APP_NAME: "Yarc"
+  BIN_DIR: "bin"
+  VITE_PORT: "{{.WAILS_VITE_PORT | default 5173}}"
+
+includes:
+  common: ./build/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+  linux: ./build/linux/Taskfile.yml
+
+tasks:
+  build:
+    summary: Builds the application for the host platform
+    cmds:
+      - task: "{{OS}}:build"
+
+  package:
+    summary: Packages a production build of the application
+    cmds:
+      - task: "{{OS}}:package"
+
+  run:
+    summary: Builds and runs the application
+    cmds:
+      - task: "{{OS}}:run"
+
+  dev:
+    summary: Runs the application in development mode with hot reload
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+
+  bindings:
+    summary: Generates the TypeScript bindings for the frontend
+    cmds:
+      - task: common:generate:bindings
+
+  tidy:
+    summary: Runs `go mod tidy`
+    cmds:
+      - task: common:go:mod:tidy
