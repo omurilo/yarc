@@ -1,6 +1,7 @@
 import { FileUp, TerminalSquare, X } from "lucide-react";
 import { useState } from "react";
 import { parseCurl } from "../services/curl";
+import { isYaakExport, parseYaak } from "../services/yaak";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 import type { CollectionNode } from "../types/api";
 
@@ -12,6 +13,7 @@ type Props = {
 export function ImportDialog({ open, onClose }: Props) {
   const importRequest = useWorkspaceStore((state) => state.importRequest);
   const importCollections = useWorkspaceStore((state) => state.importCollections);
+  const importEnvironments = useWorkspaceStore((state) => state.importEnvironments);
   const [command, setCommand] = useState("");
   const [error, setError] = useState("");
 
@@ -34,8 +36,20 @@ export function ImportDialog({ open, onClose }: Props) {
     setError("");
     try {
       const parsed = JSON.parse(await file.text());
+
+      // Yaak export (yaakSchema + resources tree).
+      if (isYaakExport(parsed)) {
+        const { collections, environments } = parseYaak(parsed);
+        if (collections.length === 0) throw new Error("Yaak file has no requests or folders to import.");
+        importCollections(collections);
+        importEnvironments(environments);
+        onClose();
+        return;
+      }
+
+      // Native Yarc collection (array of nodes, or { collections: [...] }).
       const nodes = (Array.isArray(parsed) ? parsed : parsed.collections) as CollectionNode[] | undefined;
-      if (!Array.isArray(nodes)) throw new Error("File does not contain a Yarc collection.");
+      if (!Array.isArray(nodes)) throw new Error("Unrecognized file. Expected a Yarc collection or a Yaak export.");
       importCollections(nodes);
       onClose();
     } catch (cause) {
@@ -67,7 +81,7 @@ export function ImportDialog({ open, onClose }: Props) {
           <div className="mt-3 flex items-center justify-between gap-2">
             <label className="flex h-9 cursor-pointer items-center gap-2 rounded-md border border-line bg-panel px-3 text-xs text-slate-300 hover:border-accent">
               <FileUp size={14} />
-              Import collection (.json)
+              Import collection · Yarc / Yaak (.json)
               <input type="file" accept="application/json,.json" className="hidden" onChange={(event) => void importJson(event.target.files?.[0])} />
             </label>
             <button onClick={importCurl} disabled={!command.trim()} className="h-9 rounded-md bg-accent px-4 text-sm font-semibold text-ink disabled:opacity-60">

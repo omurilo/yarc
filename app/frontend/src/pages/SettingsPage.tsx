@@ -1,5 +1,6 @@
-import { Check, Plus, Trash2, Upload } from "lucide-react";
+import { Check, Link2, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { pickEnvFile } from "../services/apiClient";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 import type { Environment } from "../types/api";
 
@@ -24,7 +25,7 @@ export function SettingsPage() {
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <div>
               <h2 className="text-sm font-semibold text-slate-200">Environments</h2>
-              <p className="text-xs text-slate-500">Variables are interpolated into requests using {"{{name}}"}.</p>
+              <p className="text-xs text-slate-500">Variables are interpolated into requests using {"{{name}}"}. File variables link to a path and are read from disk on every use.</p>
             </div>
             <button onClick={addEnvironment} className="flex h-8 items-center gap-2 rounded-md border border-line bg-[#14181f] px-3 text-xs text-slate-200 hover:border-accent">
               <Plus size={14} />
@@ -70,10 +71,22 @@ function EnvironmentEditor({ environment, isActive, canDelete, onChange, onDelet
     Object.entries(environment.variables).map(([key, value]) => ({ key, value, secret: environment.secrets.includes(key) })),
   );
 
-  const pickFile = async (index: number, file?: File) => {
-    if (!file) return;
-    const text = await file.text();
-    updateRow(index, { value: {type: "file", text, fileName: file.name } });
+  const pickFile = async (index: number) => {
+    // Desktop: link by absolute path (content is read on every use, in the Go backend).
+    const picked = await pickEnvFile();
+    if (picked) {
+      updateRow(index, { value: { type: "file", text: picked.path, fileName: picked.name } });
+      return;
+    }
+    // Browser preview has no native picker — fall back to an inline snapshot.
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      updateRow(index, { value: { type: "file", text: await file.text(), fileName: file.name } });
+    };
+    input.click();
   };
 
   const commit = (nextName: string, nextRows: VarRow[]) => {
@@ -152,11 +165,15 @@ function EnvironmentEditor({ environment, isActive, canDelete, onChange, onDelet
               </select>
             )}
             {row.value.type === "file" ? (
-              <label className="flex h-9 cursor-pointer items-center gap-2 rounded-md border border-line bg-[#151a21] px-2 text-sm text-slate-300 hover:border-accent">
-                <Upload size={13} className="shrink-0 text-slate-500" />
-                <span className="truncate">{row.value.fileName || "Choose file"}</span>
-                <input type="file" className="hidden" onChange={(event) => void pickFile(index, event.target.files?.[0])} />
-              </label>
+              <button
+                type="button"
+                onClick={() => void pickFile(index)}
+                title={row.value.text ? `Linked file: ${row.value.text}\nRead from disk on every use.` : "Choose a file to link"}
+                className="flex h-9 items-center gap-2 rounded-md border border-line bg-[#151a21] px-2 text-sm text-slate-300 hover:border-accent"
+              >
+                <Link2 size={13} className="shrink-0 text-accent" />
+                <span className="truncate">{row.value.fileName || row.value.text || "Choose file"}</span>
+              </button>
             ) : (
               <input value={row.value.text} type={row.secret ? "password" : "text"} onChange={(event) => updateRow(index, { value: { type: "text", text: event.target.value } })} placeholder="value" className="h-9 rounded-md border border-line bg-[#14181f] px-3 font-mono text-sm text-slate-100 outline-none focus:border-accent" />
             )}

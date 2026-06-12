@@ -10,13 +10,16 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
-	grpcclient "github.com/flash/yarc/app/backend/grpc"
-	"github.com/flash/yarc/app/backend/storage"
+	grpcclient "github.com/omurilo/yarc/app/backend/grpc"
+	"github.com/omurilo/yarc/app/backend/storage"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -199,17 +202,30 @@ func (s *AppService) ExecuteHTTPStream(streamID string, input RequestInput) {
 	buffer := make([]byte, 16*1024)
 	total := 0
 	var full strings.Builder
+	// pending holds bytes carried over between reads so a multi-byte UTF-8 rune split across
+	// the read boundary is never turned into a replacement char (which would corrupt the body).
+	var pending []byte
 	for {
 		n, readErr := resp.Body.Read(buffer)
 		if n > 0 {
-			chunk := string(buffer[:n])
 			total += n
-			full.WriteString(chunk)
-			emit("chunk", chunk)
+			pending = append(pending, buffer[:n]...)
+			if split := utf8SplitPoint(pending); split > 0 {
+				chunk := string(pending[:split])
+				full.WriteString(chunk)
+				emit("chunk", chunk)
+				pending = append(pending[:0], pending[split:]...)
+			}
 		}
 		if readErr != nil {
 			break
 		}
+	}
+	// Flush any trailing bytes (a final incomplete/invalid rune is emitted as-is).
+	if len(pending) > 0 {
+		chunk := string(pending)
+		full.WriteString(chunk)
+		emit("chunk", chunk)
 	}
 
 	emit("done", map[string]any{"bodySize": total, "durationMs": time.Since(start).Milliseconds(), "cancelled": ctx.Err() != nil})
@@ -225,6 +241,38 @@ func (s *AppService) ExecuteHTTPStream(streamID string, input RequestInput) {
 		ResolvedURL: resolvedURL,
 		Sent:        sent,
 	})
+}
+
+// utf8SplitPoint returns the length of the longest prefix of b that ends on a complete UTF-8
+// rune boundary, so a trailing partial rune is held back until its remaining bytes arrive.
+func utf8SplitPoint(b []byte) int {
+	if len(b) == 0 {
+		return 0
+	}
+	// Walk back over continuation bytes (10xxxxxx) to the lead byte of the final rune.
+	i := len(b) - 1
+	for i >= 0 && i > len(b)-utf8.UTFMax && !utf8.RuneStart(b[i]) {
+		i--
+	}
+	if i < 0 {
+		return len(b)
+	}
+	lead := b[i]
+	var need int
+	switch {
+	case lead < 0x80:
+		need = 1
+	case lead < 0xE0:
+		need = 2
+	case lead < 0xF0:
+		need = 3
+	default:
+		need = 4
+	}
+	if i+need <= len(b) {
+		return len(b) // final rune is complete
+	}
+	return i // hold back the incomplete final rune
 }
 
 // CancelHTTPStream aborts an in-flight streaming request started by ExecuteHTTPStream.
@@ -278,6 +326,36 @@ func (s *AppService) SaveCollection(collection Collection) error {
 		Favorite:    collection.Favorite,
 		RequestJSON: requestJSON,
 	})
+}
+
+func (s *AppService) SaveCollections(collections []Collection) error {
+	stored := make([]storage.StoredCollection, 0, len(collections))
+	for _, collection := range collections {
+		tagsJSON, err := json.Marshal(collection.Tags)
+		if err != nil {
+			return err
+		}
+		requestJSON := ""
+		if collection.Request != nil {
+			payload, err := json.Marshal(collection.Request)
+			if err != nil {
+				return err
+			}
+			requestJSON = string(payload)
+		}
+		stored = append(stored, storage.StoredCollection{
+			ID:          collection.ID,
+			ParentID:    collection.ParentID,
+			Kind:        collection.Kind,
+			Name:        collection.Name,
+			Method:      collection.Method,
+			URL:         collection.URL,
+			TagsJSON:    string(tagsJSON),
+			Favorite:    collection.Favorite,
+			RequestJSON: requestJSON,
+		})
+	}
+	return storage.UpsertCollections(s.db, stored)
 }
 
 func (s *AppService) DeleteCollections(ids []string) error {
@@ -357,11 +435,18 @@ func (s *AppService) ListEnvironments() []Environment {
 }
 
 func defaultEnvironments() []Environment {
+	vars := func() map[string]EnvironmentValue {
+		return map[string]EnvironmentValue{
+			"api_url": {Type: "text"},
+			"token":   {Type: "text"},
+			"user_id": {Type: "text"},
+		}
+	}
 	return []Environment{
-		{ID: "local", Name: "Local", Variables: map[string]string{"api_url": "", "token": "", "user_id": ""}, Secrets: []string{"token"}, Active: true},
-		{ID: "dev", Name: "Dev", Variables: map[string]string{"api_url": "", "token": "", "user_id": ""}, Secrets: []string{"token"}, Active: false},
-		{ID: "staging", Name: "Staging", Variables: map[string]string{"api_url": "", "token": "", "user_id": ""}, Secrets: []string{"token"}, Active: false},
-		{ID: "production", Name: "Production", Variables: map[string]string{"api_url": "", "token": "", "user_id": ""}, Secrets: []string{"token"}, Active: false},
+		{ID: "local", Name: "Local", Variables: vars(), Secrets: []string{"token"}, Active: true},
+		{ID: "dev", Name: "Dev", Variables: vars(), Secrets: []string{"token"}, Active: false},
+		{ID: "staging", Name: "Staging", Variables: vars(), Secrets: []string{"token"}, Active: false},
+		{ID: "production", Name: "Production", Variables: vars(), Secrets: []string{"token"}, Active: false},
 	}
 }
 
@@ -655,9 +740,43 @@ func resolveVariables(value string, variables map[string]EnvironmentValue) strin
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		resolved = strings.ReplaceAll(resolved, "{{"+key+"}}", variables[key].Text)
+		placeholder := "{{" + key + "}}"
+		if !strings.Contains(resolved, placeholder) {
+			continue
+		}
+		resolved = strings.ReplaceAll(resolved, placeholder, variableValue(variables[key]))
 	}
 	return resolved
+}
+
+// variableValue returns the substitution for a variable. File-backed variables store a path
+// in Text and are read from disk on every use, so the request always reflects the current file
+// contents (an empty string if the file is missing/unreadable).
+func variableValue(value EnvironmentValue) string {
+	if value.Type == "file" && value.Text != "" {
+		if data, err := os.ReadFile(value.Text); err == nil {
+			return string(data)
+		}
+		return ""
+	}
+	return value.Text
+}
+
+// PickFile opens a native file picker and returns the selected path (and its base name), for
+// linking an environment variable to a file on disk.
+func (s *AppService) PickFile() FilePick {
+	app := application.Get()
+	if app == nil {
+		return FilePick{}
+	}
+	path, err := app.Dialog.OpenFile().
+		CanChooseFiles(true).
+		SetTitle("Link a file to this variable").
+		PromptForSingleSelection()
+	if err != nil || path == "" {
+		return FilePick{}
+	}
+	return FilePick{Path: path, Name: filepath.Base(path)}
 }
 
 func applyQueryParams(rawURL string, params []Header, variables map[string]EnvironmentValue) string {

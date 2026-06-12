@@ -1,6 +1,9 @@
 package api
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Header struct {
 	Key     string `json:"key"`
@@ -9,8 +12,28 @@ type Header struct {
 }
 
 type EnvironmentValue struct {
-	Text string `json:"text"`
-	Type string `json:"type"`
+	Text     string `json:"text"`
+	Type     string `json:"type"`
+	FileName string `json:"fileName,omitempty"`
+}
+
+// UnmarshalJSON accepts both the structured form {"text":"…","type":"text"} and a bare
+// string "…". Older exports and some imported collections store variables as plain strings,
+// so tolerating both keeps SaveCollection from rejecting the whole request.
+func (e *EnvironmentValue) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		e.Text = text
+		e.Type = "text"
+		return nil
+	}
+	type alias EnvironmentValue
+	var value alias
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*e = EnvironmentValue(value)
+	return nil
 }
 
 type RequestInput struct {
@@ -26,6 +49,11 @@ type RequestInput struct {
 	Tests       string                      `json:"tests"`
 	Environment map[string]EnvironmentValue `json:"environment"`
 	TimeoutMS   int                         `json:"timeoutMs"`
+}
+
+type FilePick struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
 }
 
 type SentRequest struct {
@@ -63,11 +91,11 @@ type Collection struct {
 }
 
 type Environment struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Variables map[string]string `json:"variables"`
-	Secrets   []string          `json:"secrets"`
-	Active    bool              `json:"active"`
+	ID        string                      `json:"id"`
+	Name      string                      `json:"name"`
+	Variables map[string]EnvironmentValue `json:"variables"`
+	Secrets   []string                    `json:"secrets"`
+	Active    bool                        `json:"active"`
 }
 
 type HistoryEntry struct {

@@ -1,9 +1,11 @@
 import Editor from "@monaco-editor/react";
-import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileText, Filter, RadioTower, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { AlertTriangle, Check, CheckCircle2, ChevronRight, Clipboard, Clock3, FileText, Filter, History, RadioTower, Save, Trash2, X } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { downloadFile } from "../services/download";
 import { applyJsonFilter } from "../services/jsonFilter";
 import { resolveRequestPreview } from "../services/snippets";
-import type { ApiRequest, ApiResponse } from "../types/api";
+import { useWorkspaceStore } from "../store/useWorkspaceStore";
+import type { ApiRequest, ApiResponse, HistoryEntry } from "../types/api";
 
 type Props = {
   response?: ApiResponse;
@@ -19,6 +21,13 @@ export function ResponseViewer({ response, loading, sentRequest }: Props) {
   const [filter, setFilter] = useState("");
   const [raw, setRaw] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<number | null>(null);
+  const activeRequestId = useWorkspaceStore((state) => state.activeRequest.id);
+  const activeRequestName = useWorkspaceStore((state) => state.activeRequest.name);
+  const history = useWorkspaceStore((state) => state.history);
+  const setResponse = useWorkspaceStore((state) => state.setResponse);
+  const clearResponse = useWorkspaceStore((state) => state.clearResponse);
+  const clearHistory = useWorkspaceStore((state) => state.clearHistory);
+  const requestHistory = useMemo(() => history.filter((entry) => entry.request.id === activeRequestId), [history, activeRequestId]);
   const ok = response && response.statusCode >= 200 && response.statusCode < 300;
   const inspected = useMemo(() => {
     if (response?.sent) {
@@ -67,16 +76,26 @@ export function ResponseViewer({ response, loading, sentRequest }: Props) {
           {response?.error ? <AlertTriangle size={16} className="text-danger" /> : <CheckCircle2 size={16} className={ok ? "text-accent" : "text-slate-500"} />}
           <span>{loading ? "Waiting for response" : response?.status ?? "No response yet"}</span>
         </div>
-        {response && (
-          <div className="ml-auto flex items-center gap-4 text-xs text-slate-400">
-            <span className="flex items-center gap-1">
-              <Clock3 size={14} /> {response.durationMs} ms
-            </span>
-            <span className="flex items-center gap-1">
-              <FileText size={14} /> {formatBytes(response.bodySize)}
-            </span>
-          </div>
-        )}
+        <div className="ml-auto flex items-center gap-4 text-xs text-slate-400">
+          {response && (
+            <>
+              <span className="flex items-center gap-1">
+                <Clock3 size={14} /> {response.durationMs} ms
+              </span>
+              <span className="flex items-center gap-1">
+                <FileText size={14} /> {formatBytes(response.bodySize)}
+              </span>
+            </>
+          )}
+          <ResponseHistoryMenu
+            response={response}
+            requestName={activeRequestName}
+            history={requestHistory}
+            onLoad={(entry) => setResponse(entry.response)}
+            onDeleteResponse={clearResponse}
+            onClearHistory={() => clearHistory(activeRequestId)}
+          />
+        </div>
       </div>
 
       <div className="flex items-center gap-1 border-b border-line px-3 py-1.5">
@@ -234,6 +253,116 @@ export function ResponseViewer({ response, loading, sentRequest }: Props) {
         )}
       </div>
     </div>
+  );
+}
+
+type HistoryMenuProps = {
+  response?: ApiResponse;
+  requestName: string;
+  history: HistoryEntry[];
+  onLoad: (entry: HistoryEntry) => void;
+  onDeleteResponse: () => void;
+  onClearHistory: () => void;
+};
+
+function ResponseHistoryMenu({ response, requestName, history, onLoad, onDeleteResponse, onClearHistory }: HistoryMenuProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const saveToFile = () => {
+    if (!response) return;
+    const contentType = response.headers["Content-Type"] ?? response.headers["content-type"] ?? "text/plain";
+    const extension = contentType.includes("json") ? "json" : contentType.includes("xml") ? "xml" : contentType.includes("html") ? "html" : "txt";
+    downloadFile(`${(requestName || "response").replace(/\s+/g, "-").toLowerCase()}.${extension}`, response.body, contentType);
+    setOpen(false);
+  };
+  const copyBody = () => {
+    if (response) void navigator.clipboard?.writeText(response.body);
+    setOpen(false);
+  };
+  const deleteResponse = () => {
+    onDeleteResponse();
+    setOpen(false);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        title="Response actions & history"
+        onClick={() => setOpen((value) => !value)}
+        className={`grid h-8 w-8 place-items-center rounded-md ${open ? "bg-panel text-accent" : "text-slate-400 hover:bg-panel hover:text-slate-100"}`}
+      >
+        <History size={16} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-9 z-20 w-72 overflow-hidden rounded-lg border border-line bg-[#1b2028] shadow-xl">
+          <div className="p-1">
+            <MenuItem icon={<Save size={16} />} label="Save to File" disabled={!response} onClick={saveToFile} />
+            <MenuItem icon={<Clipboard size={16} />} label="Copy Body" disabled={!response} onClick={copyBody} />
+            <MenuItem icon={<Trash2 size={16} />} label="Delete" disabled={!response} onClick={deleteResponse} />
+          </div>
+          <div className="flex items-center justify-between border-t border-line px-3 pb-1 pt-2">
+            <span className="text-xs uppercase tracking-wide text-slate-500">History</span>
+            {history.length > 0 && (
+              <button onClick={() => { onClearHistory(); setOpen(false); }} className="text-xs text-danger hover:underline">
+                Delete {history.length} {history.length === 1 ? "Response" : "Responses"}
+              </button>
+            )}
+          </div>
+          <div className="max-h-64 overflow-auto p-1 pt-0">
+            {history.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-slate-500">No saved responses yet.</div>
+            ) : (
+              history.map((entry) => {
+                const active = response?.receivedAt === entry.response.receivedAt;
+                const code = entry.response.statusCode;
+                const codeColor = code === 0 ? "text-danger" : code < 300 ? "text-accent" : code < 400 ? "text-warn" : "text-danger";
+                return (
+                  <button
+                    key={entry.id}
+                    onClick={() => { onLoad(entry); setOpen(false); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-panel"
+                    title={new Date(entry.createdAt).toLocaleString()}
+                  >
+                    <Check size={14} className={active ? "text-slate-200" : "text-transparent"} />
+                    <span className={`w-9 shrink-0 font-mono font-semibold ${codeColor}`}>{code || "ERR"}</span>
+                    <ChevronRight size={13} className="shrink-0 text-slate-600" />
+                    <span className="font-mono text-slate-300">{entry.response.durationMs}ms</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({ icon, label, onClick, disabled }: { icon: ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-left text-sm text-slate-200 hover:bg-panel disabled:cursor-not-allowed disabled:text-slate-600 disabled:hover:bg-transparent"
+    >
+      <span className="text-slate-400">{icon}</span>
+      {label}
+    </button>
   );
 }
 

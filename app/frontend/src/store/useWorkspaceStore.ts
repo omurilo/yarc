@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { deleteCollections, saveCollection, saveEnvironment } from "../services/apiClient";
+import { deleteCollections, saveCollection, saveCollections, saveEnvironment } from "../services/apiClient";
 import type { ApiRequest, ApiResponse, CollectionNode, Environment, HistoryEntry, WorkspaceBootstrap } from "../types/api";
 
 const starterRequest: ApiRequest = {
@@ -32,7 +32,9 @@ type WorkspaceState = {
   setCommandOpen: (open: boolean) => void;
   updateRequest: (patch: Partial<ApiRequest>) => void;
   setResponse: (response: ApiResponse) => void;
+  clearResponse: () => void;
   addHistory: (entry: HistoryEntry) => void;
+  clearHistory: (requestId: string) => void;
   addCollection: (kind: "folder" | "request") => void;
   addCollectionInside: (parentId: string, kind: "folder" | "request") => void;
   selectCollection: (id: string) => void;
@@ -45,6 +47,7 @@ type WorkspaceState = {
   duplicateActiveRequest: () => void;
   importRequest: (request: ApiRequest, parentId?: string) => void;
   importCollections: (nodes: CollectionNode[]) => void;
+  importEnvironments: (environments: Environment[]) => void;
   setActiveEnvironment: (id: string) => void;
   addEnvironment: () => void;
   updateEnvironment: (environment: Environment) => void;
@@ -73,8 +76,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setCommandOpen: (commandOpen) => set({ commandOpen }),
   updateRequest: (patch) => set({ activeRequest: { ...get().activeRequest, ...patch } }),
   setResponse: (activeResponse) => set({ activeResponse }),
+  clearResponse: () => set({ activeResponse: undefined }),
   addHistory: (entry) => {
     const history = [entry, ...get().history].slice(0, 200);
+    localStorage.setItem("yarc.history", JSON.stringify(history));
+    set({ history });
+  },
+  clearHistory: (requestId) => {
+    const history = get().history.filter((entry) => entry.request.id !== requestId);
     localStorage.setItem("yarc.history", JSON.stringify(history));
     set({ history });
   },
@@ -249,7 +258,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
     if (remapped.length === 0) return;
     set({ collections: [...get().collections, ...remapped] });
-    remapped.forEach((node) => void saveCollection(node));
+    void saveCollections(remapped);
+  },
+  importEnvironments: (environments) => {
+    if (environments.length === 0) return;
+    set({ environments: [...get().environments, ...environments] });
+    environments.forEach((environment) => void saveEnvironment(environment));
   },
   setActiveEnvironment: (id) => {
     const environments = get().environments.map((env) => ({ ...env, active: env.id === id }));

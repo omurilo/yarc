@@ -38,7 +38,7 @@ export function AppShell() {
     <div className="grid h-screen grid-cols-[56px_292px_minmax(0,1fr)] overflow-hidden bg-ink text-slate-100">
       <aside className="flex flex-col items-center justify-between border-r border-line bg-rail py-3">
         <div className="flex flex-col gap-2">
-          <div className="mb-2 grid h-9 w-9 place-items-center rounded-md bg-accent text-sm font-black text-ink">Y</div>
+          <img src="/logo.svg" alt="Yarc" className="mb-2 h-9 w-9" draggable={false} />
           {views.map((view) => {
             const Icon = view.icon;
             return (
@@ -67,8 +67,8 @@ export function AppShell() {
         </div>
       </aside>
 
-      <aside className="flex min-w-0 flex-col border-r border-line bg-[#191d24]">
-        <div className="border-b border-line px-3 py-3">
+      <aside className="flex min-h-0 min-w-0 flex-col border-r border-line bg-[#191d24]">
+        <div className="shrink-0 border-b border-line px-3 py-3">
           <button
             onClick={() => setCommandOpen(true)}
             className="flex h-9 w-full items-center gap-2 rounded-md border border-line bg-panel px-3 text-left text-sm text-slate-300 hover:border-accent/60"

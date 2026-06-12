@@ -1,4 +1,4 @@
-module github.com/flash/yarc/app
+module github.com/omurilo/yarc/app
 
 go 1.25.0
 

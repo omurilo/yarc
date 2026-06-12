@@ -20,6 +20,16 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// SQLite tolerates a single writer. The Wails bindings run each call in its own
+	// goroutine, so a batch import fires many concurrent writes; without serialization
+	// those collide with SQLITE_BUSY and rows are silently dropped. Pinning to a single
+	// connection (plus a busy timeout as a safety net) serializes all access.
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -86,6 +96,57 @@ func UpsertCollection(db *sql.DB, collection StoredCollection) error {
 		collection.UpdatedAt,
 	)
 	return err
+}
+
+// UpsertCollections writes many collections in a single transaction so a batch import
+// either fully persists or rolls back, instead of racing row-by-row.
+func UpsertCollections(db *sql.DB, collections []StoredCollection) error {
+	if len(collections) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	stmt, err := tx.Prepare(
+		`insert into collections (id, parent_id, kind, name, method, url, tags_json, favorite, request_json, created_at, updated_at)
+		 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 on conflict(id) do update set
+			parent_id = excluded.parent_id,
+			kind = excluded.kind,
+			name = excluded.name,
+			method = excluded.method,
+			url = excluded.url,
+			tags_json = excluded.tags_json,
+			favorite = excluded.favorite,
+			request_json = excluded.request_json,
+			updated_at = excluded.updated_at`,
+	)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, collection := range collections {
+		if collection.CreatedAt == "" {
+			collection.CreatedAt = now
+		}
+		collection.UpdatedAt = now
+		if collection.TagsJSON == "" {
+			collection.TagsJSON = "[]"
+		}
+		if _, err := stmt.Exec(
+			collection.ID, collection.ParentID, collection.Kind, collection.Name,
+			collection.Method, collection.URL, collection.TagsJSON, collection.Favorite,
+			collection.RequestJSON, collection.CreatedAt, collection.UpdatedAt,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func ListCollections(db *sql.DB) ([]StoredCollection, error) {

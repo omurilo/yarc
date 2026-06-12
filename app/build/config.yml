@@ -1,14 +1,15 @@
+# yaml-language-server: $schema=https://wails.io
 # Configuration consumed by `wails3 dev` (and `wails3 update build-assets`).
 # After editing `info`, run `wails3 task common:update:build-assets` to refresh assets.
 version: '3'
 
 # Used to generate platform build assets (Info.plist, manifests, etc.).
 info:
-  companyName: "Flash"
+  companyName: "oMuriloDev"
   productName: "Yarc"
-  productIdentifier: "com.flash.yarc"
+  productIdentifier: "com.omurilodev.yarc"
   description: "A fast, local-first API client for REST, GraphQL, WebSocket, and gRPC."
-  copyright: "(c) 2026, Flash"
+  copyright: "(c) 2026, oMuriloDev"
   comments: "Local-first API workspace"
   version: "0.1.0"
 

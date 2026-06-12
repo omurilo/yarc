@@ -1,6 +1,7 @@
 import { Check, Code2, Copy } from "lucide-react";
-import { useMemo, useState } from "react";
-import { buildSnippet, snippetLabels, snippetLanguages } from "../services/snippets";
+import { useEffect, useState } from "react";
+import { generateSnippet } from "../services/apiClient";
+import { snippetLabels, snippetLanguages } from "../services/snippets";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 
 export function SnippetPanel() {
@@ -11,12 +12,19 @@ export function SnippetPanel() {
   const [copied, setCopied] = useState(false);
 
   // Resolve variables against the active environment (the request itself doesn't store them),
-  // so the snippet updates whenever a variable is edited in Settings.
+  // so the snippet updates whenever a variable is edited in Settings. Generation is async because
+  // file-type variables are resolved from disk by the Go backend.
   const activeEnvironment = environments.find((environment) => environment.id === activeEnvironmentId);
-  const snippet = useMemo(
-    () => buildSnippet(language, { ...request, environment: activeEnvironment?.variables ?? {} }),
-    [language, request, activeEnvironment],
-  );
+  const [snippet, setSnippet] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    void generateSnippet(language, { ...request, environment: activeEnvironment?.variables ?? {} }).then((result) => {
+      if (!cancelled) setSnippet(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, request, activeEnvironment]);
 
   const copy = async () => {
     try {

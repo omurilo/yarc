@@ -1,8 +1,9 @@
 import type { ApiRequest, ApiResponse, CollectionNode, Environment, GrpcInvokeResponse, GrpcMethodList, GrpcRequest, HistoryEntry, SentRequestInfo, WorkspaceBootstrap } from "../types/api";
 // Wails v3 exposes Go services as generated ES module bindings (not the v2 `window.go`).
 // They only work inside the Wails webview, where the page is served from the wails:// origin.
-import { AppService } from "../../bindings/github.com/flash/yarc/app/backend/api";
+import { AppService } from "../../bindings/github.com/omurilo/yarc/app/backend/api";
 import { Events } from "@wailsio/runtime";
+import { buildSnippet } from "./snippets";
 
 const inWails = typeof window !== "undefined" && window.location.protocol === "wails:";
 
@@ -44,6 +45,17 @@ export async function saveCollection(collection: CollectionNode): Promise<void> 
   localStorage.setItem("yarc.collections", JSON.stringify(next));
 }
 
+export async function saveCollections(collections: CollectionNode[]): Promise<void> {
+  if (collections.length === 0) return;
+  if (wailsService()?.SaveCollections) {
+    return wailsService()!.SaveCollections(collections);
+  }
+  const existing = readLocal<CollectionNode[]>("yarc.collections", workspaceOnly());
+  const byId = new Map(existing.map((item) => [item.id, item]));
+  collections.forEach((item) => byId.set(item.id, item));
+  localStorage.setItem("yarc.collections", JSON.stringify([...byId.values()]));
+}
+
 export async function deleteCollections(ids: string[]): Promise<void> {
   const removable = new Set(ids.filter((id) => id !== "workspace"));
   if (wailsService()?.DeleteCollections) {
@@ -51,6 +63,16 @@ export async function deleteCollections(ids: string[]): Promise<void> {
   }
   const collections = readLocal<CollectionNode[]>("yarc.collections", workspaceOnly());
   localStorage.setItem("yarc.collections", JSON.stringify(collections.filter((item) => !removable.has(item.id))));
+}
+
+// Opens a native file picker (desktop only) and returns the chosen absolute path + base name,
+// for linking an environment variable to a file. Returns null in the browser preview.
+export async function pickEnvFile(): Promise<{ path: string; name: string } | null> {
+  if (wailsService()?.PickFile) {
+    const result = await wailsService()!.PickFile();
+    return result?.path ? { path: result.path, name: result.name } : null;
+  }
+  return null;
 }
 
 export async function saveEnvironment(environment: Environment): Promise<void> {
@@ -255,13 +277,13 @@ export async function listHistory(query: string): Promise<HistoryEntry[]> {
 }
 
 export async function generateSnippet(language: string, request: ApiRequest): Promise<string> {
+  // The Go backend resolves file-type variables from disk (so the snippet shows real content,
+  // not the linked path). The browser preview can't read the filesystem, so it falls back to
+  // the client-side generator, which substitutes the variable's stored text.
   if (wailsService()?.GenerateSnippet) {
     return wailsService()!.GenerateSnippet({ language, request });
   }
-  if (language === "curl") {
-    return `curl -X ${request.method} "${request.url}"`;
-  }
-  return `const response = await fetch("${request.url}", { method: "${request.method}" });`;
+  return buildSnippet(language, request);
 }
 
 const grpcBrowserUnavailable = "gRPC runs over HTTP/2 and is only available in the Yarc desktop app, not the browser preview.";
