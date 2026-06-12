@@ -1,5 +1,5 @@
 import Editor from "@monaco-editor/react";
-import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileText, Filter, RadioTower } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileText, Filter, RadioTower, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { applyJsonFilter } from "../services/jsonFilter";
 import { resolveRequestPreview } from "../services/snippets";
@@ -18,6 +18,7 @@ export function ResponseViewer({ response, loading, sentRequest }: Props) {
   const [tab, setTab] = useState<Tab>("Response");
   const [filter, setFilter] = useState("");
   const [raw, setRaw] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<number | null>(null);
   const ok = response && response.statusCode >= 200 && response.statusCode < 300;
   const inspected = useMemo(() => {
     if (response?.sent) {
@@ -115,21 +116,44 @@ export function ResponseViewer({ response, loading, sentRequest }: Props) {
               </button>
             </div>
             {isSse && !raw ? (
-              <div className="min-h-0 flex-1 overflow-auto p-3">
-                {sseEvents.length === 0 ? (
-                  <div className="text-sm text-slate-500">{loading ? "Waiting for events…" : "No events."}</div>
-                ) : (
-                  <div className="grid gap-2">
-                    {sseEvents.map((event, index) => (
-                      <div key={index} className="rounded-md border border-line bg-panel">
-                        <div className="flex items-center gap-2 border-b border-line/60 px-3 py-1.5 text-xs text-slate-400">
-                          <span className="font-semibold text-accent">{event.event}</span>
-                          {event.id && <span className="text-slate-500">id: {event.id}</span>}
-                          <span className="ml-auto text-slate-600">#{index + 1}</span>
-                        </div>
-                        <pre className="overflow-auto px-3 py-2 font-mono text-xs leading-5 text-slate-200">{prettyMaybeJson(event.data)}</pre>
-                      </div>
-                    ))}
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="min-h-0 flex-1 overflow-auto py-1 font-mono text-xs">
+                  {sseEvents.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-slate-500">{loading ? "Waiting for events…" : "No events."}</div>
+                  ) : (
+                    sseEvents.map((event, index) => (
+                      <button
+                        key={index}
+                        onClick={() => setSelectedEvent((current) => (current === index ? null : index))}
+                        className={`flex w-full items-center gap-2 px-2 py-1 text-left ${selectedEvent === index ? "bg-panel" : "hover:bg-panel/60"}`}
+                      >
+                        <ChevronRight size={13} className={`shrink-0 text-slate-600 transition-transform ${selectedEvent === index ? "rotate-90" : ""}`} />
+                        <span className="w-6 shrink-0 text-right text-slate-500">{index}</span>
+                        <span className="shrink-0 rounded bg-[#2a303a] px-2 py-0.5 text-slate-200">{event.event}</span>
+                        <span className="min-w-0 flex-1 truncate text-slate-500">{singleLine(event.data)}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+                {selectedEvent !== null && sseEvents[selectedEvent] && (
+                  <div className="flex min-h-0 flex-1 flex-col border-t border-line">
+                    <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5 text-xs">
+                      <span className="w-6 shrink-0 text-right text-slate-500">{selectedEvent}</span>
+                      <span className="shrink-0 rounded bg-[#2a303a] px-2 py-0.5 font-mono text-slate-200">{sseEvents[selectedEvent].event}</span>
+                      {sseEvents[selectedEvent].id && <span className="truncate text-slate-500">id: {sseEvents[selectedEvent].id}</span>}
+                      <button onClick={() => setSelectedEvent(null)} className="ml-auto grid h-6 w-6 place-items-center rounded text-slate-400 hover:bg-panel hover:text-slate-100">
+                        <X size={14} />
+                      </button>
+                    </div>
+                    <div className="relative min-h-0 flex-1">
+                      <Editor
+                        height="100%"
+                        language={looksJson(sseEvents[selectedEvent].data) ? "json" : "plaintext"}
+                        theme="vs-dark"
+                        value={prettyMaybeJson(sseEvents[selectedEvent].data)}
+                        options={{ readOnly: true, minimap: { enabled: false }, fontSize: 13, wordWrap: "on", padding: { top: 12 } }}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
@@ -242,6 +266,15 @@ function prettyMaybeJson(value: string): string {
     return JSON.stringify(JSON.parse(value), null, 2);
   } catch {
     return value;
+  }
+}
+
+// Compact one-line preview of an event's data (minified JSON when possible).
+function singleLine(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value));
+  } catch {
+    return value.replace(/\s+/g, " ").trim();
   }
 }
 
