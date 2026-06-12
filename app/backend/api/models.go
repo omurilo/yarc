@@ -8,19 +8,24 @@ type Header struct {
 	Enabled bool   `json:"enabled"`
 }
 
+type EnvironmentValue struct {
+	Text string `json:"text"`
+	Type string `json:"type"`
+}
+
 type RequestInput struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Method      string            `json:"method"`
-	URL         string            `json:"url"`
-	QueryParams []Header          `json:"queryParams"`
-	Headers     []Header          `json:"headers"`
-	BodyType    string            `json:"bodyType"`
-	Body        string            `json:"body"`
-	Auth        map[string]string `json:"auth"`
-	Tests       string            `json:"tests"`
-	Environment map[string]string `json:"environment"`
-	TimeoutMS   int               `json:"timeoutMs"`
+	ID          string                      `json:"id"`
+	Name        string                      `json:"name"`
+	Method      string                      `json:"method"`
+	URL         string                      `json:"url"`
+	QueryParams []Header                    `json:"queryParams"`
+	Headers     []Header                    `json:"headers"`
+	BodyType    string                      `json:"bodyType"`
+	Body        string                      `json:"body"`
+	Auth        map[string]string           `json:"auth"`
+	Tests       string                      `json:"tests"`
+	Environment map[string]EnvironmentValue `json:"environment"`
+	TimeoutMS   int                         `json:"timeoutMs"`
 }
 
 type SentRequest struct {

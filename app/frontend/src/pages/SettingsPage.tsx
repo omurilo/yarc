@@ -1,4 +1,4 @@
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Check, Plus, Trash2, Upload } from "lucide-react";
 import { useState } from "react";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 import type { Environment } from "../types/api";
@@ -62,7 +62,7 @@ type EditorProps = {
   onActivate: (id: string) => void;
 };
 
-type VarRow = { key: string; value: string; secret: boolean };
+type VarRow = { key: string; value: {type: string, text: string; fileName?: string;}; secret: boolean; };
 
 function EnvironmentEditor({ environment, isActive, canDelete, onChange, onDelete, onActivate }: EditorProps) {
   const [name, setName] = useState(environment.name);
@@ -70,8 +70,14 @@ function EnvironmentEditor({ environment, isActive, canDelete, onChange, onDelet
     Object.entries(environment.variables).map(([key, value]) => ({ key, value, secret: environment.secrets.includes(key) })),
   );
 
+  const pickFile = async (index: number, file?: File) => {
+    if (!file) return;
+    const text = await file.text();
+    updateRow(index, { value: {type: "file", text, fileName: file.name } });
+  };
+
   const commit = (nextName: string, nextRows: VarRow[]) => {
-    const variables: Record<string, string> = {};
+    const variables: Record<string, { type: string; text: string; fileName?: string; }> = {};
     const secrets: string[] = [];
     for (const row of nextRows) {
       if (!row.key) continue;
@@ -93,7 +99,7 @@ function EnvironmentEditor({ environment, isActive, canDelete, onChange, onDelet
     commit(name, next);
   };
 
-  const addRow = () => setRows((current) => [...current, { key: "", value: "", secret: false }]);
+  const addRow = () => setRows((current) => [...current, { key: "", value: {type: "text", text: ""}, secret: false }]);
 
   return (
     <div className="grid gap-4">
@@ -125,16 +131,35 @@ function EnvironmentEditor({ environment, isActive, canDelete, onChange, onDelet
       </div>
 
       <div className="grid gap-2">
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_72px_32px] gap-2 px-1 text-xs uppercase tracking-wide text-slate-500">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_32px] gap-2 px-1 text-xs uppercase tracking-wide text-slate-500">
           <span>Variable</span>
+          <span>Type</span>
           <span>Value</span>
           <span>Secret</span>
           <span />
         </div>
         {rows.map((row, index) => (
-          <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_72px_32px] gap-2">
+          <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_32px] gap-2">
             <input value={row.key} onChange={(event) => updateRow(index, { key: event.target.value })} placeholder="api_url" className="h-9 rounded-md border border-line bg-[#14181f] px-3 font-mono text-sm text-slate-100 outline-none focus:border-accent" />
-            <input value={row.value} type={row.secret ? "password" : "text"} onChange={(event) => updateRow(index, { value: event.target.value })} placeholder="value" className="h-9 rounded-md border border-line bg-[#14181f] px-3 font-mono text-sm text-slate-100 outline-none focus:border-accent" />
+            {(
+              <select
+                value={row.value.type}
+                onChange={(event) => updateRow(index, { value: {text: "", type: event.target.value as VarRow["value"]["type"]} })}
+                className="h-9 rounded-md border border-line bg-panel px-2 text-sm outline-none focus:border-accent"
+              >
+                <option value="text">Text</option>
+                <option value="file">File</option>
+              </select>
+            )}
+            {row.value.type === "file" ? (
+              <label className="flex h-9 cursor-pointer items-center gap-2 rounded-md border border-line bg-[#151a21] px-2 text-sm text-slate-300 hover:border-accent">
+                <Upload size={13} className="shrink-0 text-slate-500" />
+                <span className="truncate">{row.value.fileName || "Choose file"}</span>
+                <input type="file" className="hidden" onChange={(event) => void pickFile(index, event.target.files?.[0])} />
+              </label>
+            ) : (
+              <input value={row.value.text} type={row.secret ? "password" : "text"} onChange={(event) => updateRow(index, { value: { type: "text", text: event.target.value } })} placeholder="value" className="h-9 rounded-md border border-line bg-[#14181f] px-3 font-mono text-sm text-slate-100 outline-none focus:border-accent" />
+            )}
             <label className="flex h-9 items-center justify-center rounded-md border border-line bg-[#14181f]">
               <input type="checkbox" checked={row.secret} onChange={(event) => updateRow(index, { secret: event.target.checked })} className="h-4 w-4 accent-accent" />
             </label>

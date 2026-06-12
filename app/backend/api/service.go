@@ -647,7 +647,7 @@ func (s *AppService) InvokeGRPC(req grpcclient.Request) grpcclient.InvokeRespons
 	return grpcclient.Invoke(context.Background(), req)
 }
 
-func resolveVariables(value string, variables map[string]string) string {
+func resolveVariables(value string, variables map[string]EnvironmentValue) string {
 	resolved := value
 	keys := make([]string, 0, len(variables))
 	for key := range variables {
@@ -655,12 +655,12 @@ func resolveVariables(value string, variables map[string]string) string {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		resolved = strings.ReplaceAll(resolved, "{{"+key+"}}", variables[key])
+		resolved = strings.ReplaceAll(resolved, "{{"+key+"}}", variables[key].Text)
 	}
 	return resolved
 }
 
-func applyQueryParams(rawURL string, params []Header, variables map[string]string) string {
+func applyQueryParams(rawURL string, params []Header, variables map[string]EnvironmentValue) string {
 	if len(params) == 0 {
 		return rawURL
 	}
@@ -680,7 +680,7 @@ func applyQueryParams(rawURL string, params []Header, variables map[string]strin
 	return parsed.String()
 }
 
-func applyQueryAuth(rawURL string, auth map[string]string, variables map[string]string) string {
+func applyQueryAuth(rawURL string, auth map[string]string, variables map[string]EnvironmentValue) string {
 	if auth["type"] != "apiKey" || auth["addTo"] != "query" || auth["key"] == "" {
 		return rawURL
 	}
@@ -694,7 +694,7 @@ func applyQueryAuth(rawURL string, auth map[string]string, variables map[string]
 	return parsed.String()
 }
 
-func applyHeaderAuth(req *http.Request, auth map[string]string, variables map[string]string) {
+func applyHeaderAuth(req *http.Request, auth map[string]string, variables map[string]EnvironmentValue) {
 	switch auth["type"] {
 	case "bearer":
 		token := resolveVariables(auth["token"], variables)

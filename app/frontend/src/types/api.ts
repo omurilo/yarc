@@ -27,7 +27,7 @@ export type ApiRequest = {
   formFields?: FormField[];
   auth: Record<string, string>;
   tests: string;
-  environment: Record<string, string>;
+  environment: Record<string, { text: string; type: string; fileName?: string; }>;
   timeoutMs: number;
 };
 
@@ -54,7 +54,7 @@ export type SentRequestInfo = {
 export type Environment = {
   id: string;
   name: string;
-  variables: Record<string, string>;
+  variables: Record<string, { text: string; type: string; fileName?: string; }>;
   secrets: string[];
   active: boolean;
 };

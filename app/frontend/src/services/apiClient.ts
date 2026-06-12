@@ -12,10 +12,10 @@ const inWails = typeof window !== "undefined" && window.location.protocol === "w
 const wailsService = (): any => (inWails ? AppService : null);
 
 const defaultEnvironments: Environment[] = [
-  { id: "local", name: "Local", variables: { api_url: "", token: "", user_id: "" }, secrets: ["token"], active: true },
-  { id: "dev", name: "Dev", variables: { api_url: "", token: "", user_id: "" }, secrets: ["token"], active: false },
-  { id: "staging", name: "Staging", variables: { api_url: "", token: "", user_id: "" }, secrets: ["token"], active: false },
-  { id: "production", name: "Production", variables: { api_url: "", token: "", user_id: "" }, secrets: ["token"], active: false },
+  { id: "local", name: "Local", variables: { api_url: {text: "", type: "text"}, token: {text: "", type: "text"}, user_id: {text: "", type: "text"} }, secrets: ["token"], active: true },
+  { id: "dev", name: "Dev", variables: { api_url: {text: "", type: "text"}, token: {text: "", type: "text"}, user_id: {text: "", type: "text"} }, secrets: ["token"], active: false },
+  { id: "staging", name: "Staging", variables: { api_url: {text: "", type: "text"}, token: {text: "", type: "text"}, user_id: {text: "", type: "text"} }, secrets: ["token"], active: false },
+  { id: "production", name: "Production", variables: { api_url: {text: "", type: "text"}, token: {text: "", type: "text"}, user_id: {text: "", type: "text"} }, secrets: ["token"], active: false },
 ];
 
 export async function bootstrapWorkspace(): Promise<WorkspaceBootstrap> {
@@ -219,7 +219,7 @@ export async function streamHttpRequest(request: ApiRequest, handlers: StreamHan
     const decoder = new TextDecoder();
     let buffer = "";
     let metaParsed = false;
-    for (;;) {
+    for (; ;) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -314,8 +314,8 @@ function parseProtoMethods(source: string): GrpcMethodList["methods"] {
   return methods;
 }
 
-function resolveVariables(value: string, variables: Record<string, string> | undefined) {
-  return Object.entries(variables ?? {}).reduce((next, [key, variable]) => next.replaceAll(`{{${key}}}`, variable), value ?? "");
+function resolveVariables(value: string, variables: Record<string, { text: string; type: string; fileName?: string; }> | undefined) {
+  return Object.entries(variables ?? {}).reduce((next, [key, variable]) => next.replaceAll(`{{${key}}}`, variable.text), value ?? "");
 }
 
 function applyQuery(url: string, params: ApiRequest["queryParams"]) {

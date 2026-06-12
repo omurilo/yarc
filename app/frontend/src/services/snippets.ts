@@ -272,11 +272,11 @@ function contentType(bodyType: ApiRequest["bodyType"]): string {
   }
 }
 
-function resolveVars(value: string, variables: Record<string, string>): string {
-  return Object.entries(variables).reduce((next, [key, variable]) => next.replaceAll(`{{${key}}}`, variable), value);
+function resolveVars(value: string, variables: Record<string, {text: string; fileName?: string; type: string;}>): string {
+  return Object.entries(variables).reduce((next, [key, variable]) => next.replaceAll(`{{${key}}}`, variable.text), value);
 }
 
-function applyQuery(url: string, params: ApiRequest["queryParams"], env: Record<string, string>): string {
+function applyQuery(url: string, params: ApiRequest["queryParams"], env: Record<string, {text: string; fileName?: string; type: string;}>): string {
   const enabled = params.filter((param) => param.enabled && param.key);
   if (enabled.length === 0) return url;
   const [base, rawQuery = ""] = url.split("?");
@@ -285,7 +285,7 @@ function applyQuery(url: string, params: ApiRequest["queryParams"], env: Record<
   return `${base}?${search.toString()}`;
 }
 
-function applyQueryAuth(url: string, auth: Record<string, string>, env: Record<string, string>): string {
+function applyQueryAuth(url: string, auth: Record<string, string>, env: Record<string, {text: string; fileName?: string; type: string;}>): string {
   if (auth.type !== "apiKey" || auth.addTo !== "query" || !auth.key) return url;
   const [base, rawQuery = ""] = url.split("?");
   const search = new URLSearchParams(rawQuery);
