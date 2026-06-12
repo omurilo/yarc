@@ -27,12 +27,16 @@ tasks:
 
   build:universal:
     summary: Builds a macOS universal binary (arm64 + amd64)
+    # Build the frontend + bindings ONCE up front, then compile each arch sequentially. Running
+    # the two arch builds as parallel `deps` would spawn two concurrent `yarn install` /
+    # `generate bindings` runs that race on the shared Yarn cache and the bindings output dir.
     deps:
+      - task: common:build:frontend
+    cmds:
       - task: build
         vars: { ARCH: amd64, OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-amd64", PRODUCTION: "true" }
       - task: build
         vars: { ARCH: arm64, OUTPUT: "{{.BIN_DIR}}/{{.APP_NAME}}-arm64", PRODUCTION: "true" }
-    cmds:
       - lipo -create -output "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
       - rm "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
 
@@ -41,6 +45,13 @@ tasks:
     deps:
       - task: build
         vars: { PRODUCTION: "true" }
+    cmds:
+      - task: create:app:bundle
+
+  package:universal:
+    summary: Packages a universal (arm64 + amd64) `.app` bundle
+    deps:
+      - task: build:universal
     cmds:
       - task: create:app:bundle
 

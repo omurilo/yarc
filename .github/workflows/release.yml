@@ -1,0 +1,151 @@
+name: Release
+
+# Builds the desktop app for macOS (.dmg), Windows (.exe) and Linux (.deb) and attaches them
+# to a GitHub Release. Triggered by pushing a version tag (e.g. `v0.1.0`) or run manually.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  WAILS_VERSION: v3.0.0-alpha.98-tui
+  GO_VERSION: "1.25.0"
+  NODE_VERSION: "22"
+  APP_NAME: Yarc
+
+jobs:
+  # ---------------------------------------------------------------- macOS (.dmg)
+  macos:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: app/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install toolchain
+        run: |
+          npm install -g yarn@1.22.22
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Package universal .app
+        run: wails3 task darwin:package:universal
+      - name: Build .dmg
+        run: |
+          rm -rf dmgroot && mkdir -p dmgroot
+          cp -R "bin/${APP_NAME}.app" dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname "${APP_NAME}" -srcfolder dmgroot -ov -format UDZO \
+            "bin/${APP_NAME}-macos-universal.dmg"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: app/bin/${{ env.APP_NAME }}-macos-universal.dmg
+
+  # ---------------------------------------------------------------- Windows (.exe)
+  windows:
+    runs-on: windows-latest
+    env:
+      CGO_ENABLED: "0" # Wails v3 on Windows uses pure-Go WebView2 bindings.
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: app/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install toolchain
+        run: |
+          npm install -g yarn@1.22.22
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+          "$(go env GOPATH)\bin" >> $env:GITHUB_PATH
+      - name: Package .exe
+        run: wails3 task windows:package
+      - name: Rename artifact
+        run: Copy-Item "bin/${env:APP_NAME}.exe" "bin/${env:APP_NAME}-windows-amd64.exe"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: app/bin/${{ env.APP_NAME }}-windows-amd64.exe
+
+  # ---------------------------------------------------------------- Linux (.deb)
+  linux:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev pkg-config
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: app/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install toolchain
+        run: |
+          npm install -g yarn@1.22.22
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Package binary
+        run: wails3 task linux:package
+      - name: Build .deb
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          PKG="pkgroot"
+          rm -rf "$PKG"
+          mkdir -p "$PKG/DEBIAN" "$PKG/usr/bin" \
+            "$PKG/usr/share/applications" \
+            "$PKG/usr/share/icons/hicolor/512x512/apps"
+          install -m 0755 "bin/${APP_NAME}" "$PKG/usr/bin/yarc"
+          cp build/icons/appicon.png "$PKG/usr/share/icons/hicolor/512x512/apps/yarc.png"
+          cat > "$PKG/usr/share/applications/yarc.desktop" <<EOF
+          [Desktop Entry]
+          Name=Yarc
+          Comment=A fast, local-first API client for REST, GraphQL, WebSocket, and gRPC.
+          Exec=yarc
+          Icon=yarc
+          Terminal=false
+          Type=Application
+          Categories=Development;Utility;
+          EOF
+          cat > "$PKG/DEBIAN/control" <<EOF
+          Package: yarc
+          Version: ${VERSION}
+          Section: devel
+          Priority: optional
+          Architecture: amd64
+          Depends: libgtk-4-1, libwebkitgtk-6.0-4
+          Maintainer: omurilo <noreply@users.noreply.github.com>
+          Description: A fast, local-first API client for REST, GraphQL, WebSocket, and gRPC.
+          EOF
+          dpkg-deb --build --root-owner-group "$PKG" "bin/${APP_NAME}-linux-amd64.deb"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: app/bin/${{ env.APP_NAME }}-linux-amd64.deb
