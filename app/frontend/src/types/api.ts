@@ -26,6 +26,7 @@ export type ApiRequest = {
   body: string;
   formFields?: FormField[];
   auth: Record<string, string>;
+  preRequestScript?: string;
   tests: string;
   environment: Record<string, { text: string; type: string; fileName?: string; }>;
   timeoutMs: number;
@@ -76,6 +77,7 @@ export type CollectionNode = {
   tags: string[];
   favorite: boolean;
   request?: ApiRequest;
+  variables?: Record<string, { text: string; type: string; fileName?: string }>;
   createdAt?: string;
   updatedAt?: string;
 };

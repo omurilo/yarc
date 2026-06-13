@@ -1,4 +1,4 @@
-import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FilePlus2, Folder, FolderOpen, FolderPlus, Pencil, Search, Star, Tag, Trash2 } from "lucide-react";
+import { Braces, ChevronRight, ChevronsDownUp, ChevronsUpDown, FilePlus2, Folder, FolderOpen, FolderPlus, Pencil, Plus, Search, Star, Tag, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import type { CollectionNode } from "../types/api";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
@@ -12,6 +12,7 @@ export function CollectionTree() {
   const renameCollection = useWorkspaceStore((state) => state.renameCollection);
   const deleteCollection = useWorkspaceStore((state) => state.deleteCollection);
   const moveCollection = useWorkspaceStore((state) => state.moveCollection);
+  const setFolderVariables = useWorkspaceStore((state) => state.setFolderVariables);
   const openCollectionRequest = useWorkspaceStore((state) => state.openCollectionRequest);
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -27,6 +28,7 @@ export function CollectionTree() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ node: CollectionNode; x: number; y: number } | null>(null);
+  const [varsFolder, setVarsFolder] = useState<CollectionNode | null>(null);
 
   useEffect(() => {
     const close = () => setMenu(null);
@@ -191,6 +193,18 @@ export function CollectionTree() {
             <FolderPlus size={14} />
             New folder
           </button>
+          {menu.node.kind === "folder" && (
+            <button
+              onClick={() => {
+                setVarsFolder(menu.node);
+                setMenu(null);
+              }}
+              className="flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-[#2a303a]"
+            >
+              <Braces size={14} />
+              Variables…
+            </button>
+          )}
           <div className="my-1 border-t border-line" />
           <button
             onClick={() => {
@@ -204,6 +218,56 @@ export function CollectionTree() {
           </button>
         </div>
       )}
+      {varsFolder && (
+        <FolderVariablesDialog
+          folder={varsFolder}
+          onClose={() => setVarsFolder(null)}
+          onSave={(variables) => {
+            setFolderVariables(varsFolder.id, variables);
+            setVarsFolder(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+type FolderVarRow = { key: string; value: string };
+
+function FolderVariablesDialog({ folder, onClose, onSave }: { folder: CollectionNode; onClose: () => void; onSave: (vars: Record<string, { text: string; type: string }>) => void }) {
+  const [rows, setRows] = useState<FolderVarRow[]>(() => Object.entries(folder.variables ?? {}).map(([key, value]) => ({ key, value: value.text })));
+
+  const save = () => {
+    const variables: Record<string, { text: string; type: string }> = {};
+    for (const row of rows) if (row.key.trim()) variables[row.key.trim()] = { text: row.value, type: "text" };
+    onSave(variables);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/45" onMouseDown={onClose}>
+      <div className="w-full max-w-lg overflow-hidden rounded-lg border border-line bg-[#1b2028] shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex h-12 items-center justify-between border-b border-line px-4 text-sm text-slate-200">
+          <span className="flex items-center gap-2"><Braces size={15} className="text-accent" /> Variables — {folder.name}</span>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-panel hover:text-slate-100"><X size={16} /></button>
+        </div>
+        <div className="grid max-h-[60vh] gap-2 overflow-auto p-4">
+          <p className="text-xs text-slate-500">Apply to every request in this folder. Environment variables override these; these override globals.</p>
+          {rows.map((row, index) => (
+            <div key={index} className="grid grid-cols-[1fr_1fr_32px] gap-2">
+              <input value={row.key} placeholder="key" onChange={(event) => setRows((current) => current.map((r, i) => (i === index ? { ...r, key: event.target.value } : r)))} className="h-9 rounded-md border border-line bg-[#14181f] px-3 font-mono text-sm text-slate-100 outline-none focus:border-accent" />
+              <input value={row.value} placeholder="value" onChange={(event) => setRows((current) => current.map((r, i) => (i === index ? { ...r, value: event.target.value } : r)))} className="h-9 rounded-md border border-line bg-[#14181f] px-3 font-mono text-sm text-slate-100 outline-none focus:border-accent" />
+              <button onClick={() => setRows((current) => current.filter((_, i) => i !== index))} className="grid h-9 w-8 place-items-center rounded-md text-slate-500 hover:bg-[#14181f] hover:text-danger"><Trash2 size={15} /></button>
+            </div>
+          ))}
+          <button onClick={() => setRows((current) => [...current, { key: "", value: "" }])} className="flex h-9 items-center justify-center gap-2 rounded-md border border-dashed border-line text-xs text-slate-400 hover:border-accent hover:text-accent">
+            <Plus size={14} /> Add variable
+          </button>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-line px-4 py-3">
+          <button onClick={onClose} className="h-9 rounded-md border border-line bg-[#14181f] px-4 text-sm text-slate-300 hover:border-accent">Cancel</button>
+          <button onClick={save} className="h-9 rounded-md bg-accent px-4 text-sm font-semibold text-ink hover:opacity-90">Save</button>
+        </div>
+      </div>
     </div>
   );
 }

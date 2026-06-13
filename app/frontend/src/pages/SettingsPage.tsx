@@ -11,9 +11,15 @@ export function SettingsPage() {
   const updateEnvironment = useWorkspaceStore((state) => state.updateEnvironment);
   const deleteEnvironment = useWorkspaceStore((state) => state.deleteEnvironment);
   const setActiveEnvironment = useWorkspaceStore((state) => state.setActiveEnvironment);
+  const globals = useWorkspaceStore((state) => state.globals);
+  const updateGlobals = useWorkspaceStore((state) => state.updateGlobals);
 
+  // Globals is a workspace-wide scope (lowest precedence), surfaced as a pinned pseudo-environment.
+  const globalsEnv: Environment = { id: "globals", name: "Globals", variables: globals, secrets: [], active: false };
+  const entries = [globalsEnv, ...environments];
   const [selectedId, setSelectedId] = useState(activeEnvironmentId);
-  const selected = environments.find((environment) => environment.id === selectedId) ?? environments[0];
+  const selected = entries.find((environment) => environment.id === selectedId) ?? environments[0] ?? globalsEnv;
+  const isGlobals = selected?.id === "globals";
 
   return (
     <div className="min-h-0 flex-1 overflow-auto bg-[#171b22]">
@@ -34,19 +40,33 @@ export function SettingsPage() {
           </div>
           <div className="grid grid-cols-[220px_minmax(0,1fr)]">
             <div className="border-r border-line p-2">
-              {environments.map((environment) => (
+              {entries.map((environment) => (
                 <button
                   key={environment.id}
                   onClick={() => setSelectedId(environment.id)}
-                  className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm ${selected?.id === environment.id ? "bg-[#14181f] text-accent" : "text-slate-300 hover:bg-[#14181f]"}`}
+                  className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm ${selected?.id === environment.id ? "bg-[#14181f] text-accent" : "text-slate-300 hover:bg-[#14181f]"} ${environment.id === "globals" ? "mb-1 border-b border-line/60 pb-2" : ""}`}
                 >
-                  <span className="min-w-0 truncate">{environment.name}</span>
+                  <span className="min-w-0 truncate">{environment.id === "globals" ? "🌐 Globals" : environment.name}</span>
                   {environment.id === activeEnvironmentId && <Check size={14} className="shrink-0 text-accent" />}
                 </button>
               ))}
-              {environments.length === 0 && <div className="px-3 py-2 text-sm text-slate-500">No environments.</div>}
             </div>
-            <div className="min-w-0 p-4">{selected ? <EnvironmentEditor key={selected.id} environment={selected} isActive={selected.id === activeEnvironmentId} canDelete={environments.length > 1} onChange={updateEnvironment} onDelete={deleteEnvironment} onActivate={setActiveEnvironment} /> : <div className="text-sm text-slate-500">Create an environment to get started.</div>}</div>
+            <div className="min-w-0 p-4">
+              {selected ? (
+                <EnvironmentEditor
+                  key={selected.id}
+                  environment={selected}
+                  isActive={selected.id === activeEnvironmentId}
+                  canDelete={!isGlobals && environments.length > 1}
+                  isGlobals={isGlobals}
+                  onChange={isGlobals ? (env) => updateGlobals(env.variables) : updateEnvironment}
+                  onDelete={deleteEnvironment}
+                  onActivate={setActiveEnvironment}
+                />
+              ) : (
+                <div className="text-sm text-slate-500">Create an environment to get started.</div>
+              )}
+            </div>
           </div>
         </section>
       </div>
@@ -58,6 +78,7 @@ type EditorProps = {
   environment: Environment;
   isActive: boolean;
   canDelete: boolean;
+  isGlobals?: boolean;
   onChange: (environment: Environment) => void;
   onDelete: (id: string) => void;
   onActivate: (id: string) => void;
@@ -65,7 +86,7 @@ type EditorProps = {
 
 type VarRow = { key: string; value: {type: string, text: string; fileName?: string;}; secret: boolean; };
 
-function EnvironmentEditor({ environment, isActive, canDelete, onChange, onDelete, onActivate }: EditorProps) {
+function EnvironmentEditor({ environment, isActive, canDelete, isGlobals = false, onChange, onDelete, onActivate }: EditorProps) {
   const [name, setName] = useState(environment.name);
   const [rows, setRows] = useState<VarRow[]>(() =>
     Object.entries(environment.variables).map(([key, value]) => ({ key, value, secret: environment.secrets.includes(key) })),
@@ -116,32 +137,36 @@ function EnvironmentEditor({ environment, isActive, canDelete, onChange, onDelet
 
   return (
     <div className="grid gap-4">
-      <div className="flex items-end gap-2">
-        <label className="grid flex-1 gap-1 text-xs text-slate-400">
-          Name
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            onBlur={() => commit(name, rows)}
-            className="h-9 rounded-md border border-line bg-[#14181f] px-3 text-sm text-slate-100 outline-none focus:border-accent"
-          />
-        </label>
-        <button
-          disabled={isActive}
-          onClick={() => onActivate(environment.id)}
-          className="h-9 rounded-md border border-line bg-[#14181f] px-3 text-xs text-slate-200 hover:border-accent disabled:opacity-50"
-        >
-          {isActive ? "Active" : "Set active"}
-        </button>
-        <button
-          disabled={!canDelete}
-          onClick={() => onDelete(environment.id)}
-          title="Delete environment"
-          className="grid h-9 w-9 place-items-center rounded-md border border-line bg-[#14181f] text-slate-400 hover:border-danger hover:text-danger disabled:opacity-50"
-        >
-          <Trash2 size={15} />
-        </button>
-      </div>
+      {isGlobals ? (
+        <p className="text-xs text-slate-500">Workspace-wide variables (lowest precedence). Environment and folder variables override these.</p>
+      ) : (
+        <div className="flex items-end gap-2">
+          <label className="grid flex-1 gap-1 text-xs text-slate-400">
+            Name
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              onBlur={() => commit(name, rows)}
+              className="h-9 rounded-md border border-line bg-[#14181f] px-3 text-sm text-slate-100 outline-none focus:border-accent"
+            />
+          </label>
+          <button
+            disabled={isActive}
+            onClick={() => onActivate(environment.id)}
+            className="h-9 rounded-md border border-line bg-[#14181f] px-3 text-xs text-slate-200 hover:border-accent disabled:opacity-50"
+          >
+            {isActive ? "Active" : "Set active"}
+          </button>
+          <button
+            disabled={!canDelete}
+            onClick={() => onDelete(environment.id)}
+            title="Delete environment"
+            className="grid h-9 w-9 place-items-center rounded-md border border-line bg-[#14181f] text-slate-400 hover:border-danger hover:text-danger disabled:opacity-50"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-2">
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_32px] gap-2 px-1 text-xs uppercase tracking-wide text-slate-500">

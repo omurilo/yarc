@@ -8,6 +8,8 @@ import { ResponseViewer } from "../components/ResponseViewer";
 import { SnippetPanel } from "../components/SnippetPanel";
 import { saveResponseFile, streamHttpRequest } from "../services/apiClient";
 import { serializeFormBody, upsertHeader } from "../services/formBody";
+import { mergedVars, runPreRequest, runTests, type EnvBridge, type ScriptOutcome, type TestResult } from "../services/scripting";
+import { folderVariables } from "../services/variableScopes";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 import type { ApiRequest, ApiResponse, HttpMethod } from "../types/api";
 
@@ -20,6 +22,8 @@ export function RestClient() {
   const request = useWorkspaceStore((state) => state.activeRequest);
   const response = useWorkspaceStore((state) => state.activeResponse);
   const environments = useWorkspaceStore((state) => state.environments);
+  const globals = useWorkspaceStore((state) => state.globals);
+  const collections = useWorkspaceStore((state) => state.collections);
   const activeEnvironmentId = useWorkspaceStore((state) => state.activeEnvironmentId);
   const updateRequest = useWorkspaceStore((state) => state.updateRequest);
   const setResponse = useWorkspaceStore((state) => state.setResponse);
@@ -27,6 +31,8 @@ export function RestClient() {
   const saveActiveRequest = useWorkspaceStore((state) => state.saveActiveRequest);
   const persistActiveRequest = useWorkspaceStore((state) => state.persistActiveRequest);
   const duplicateActiveRequest = useWorkspaceStore((state) => state.duplicateActiveRequest);
+  const updateEnvironment = useWorkspaceStore((state) => state.updateEnvironment);
+  const updateGlobals = useWorkspaceStore((state) => state.updateGlobals);
   const isSaved = request.id !== "draft";
 
   // Auto-save edits to already-saved requests (debounced).
@@ -38,13 +44,33 @@ export function RestClient() {
 
   const [sentRequest, setSentRequest] = useState<ApiRequest>();
   const [loading, setLoading] = useState(false);
+  const [scriptRun, setScriptRun] = useState<ScriptOutcome>();
   const abortRef = useRef<AbortController | null>(null);
 
   const cancel = () => abortRef.current?.abort();
 
   const run = async () => {
     const activeEnvironment = environments.find((environment) => environment.id === activeEnvironmentId);
-    let outgoing: ApiRequest = { ...request, environment: activeEnvironment?.variables ?? {} };
+    // Variable scopes (precedence: environment > folder/collection chain > globals). Mutable copies
+    // so pm.environment.set()/pm.globals.set() can chain values; persisted after the scripts run.
+    const bridge: EnvBridge = {
+      env: { ...(activeEnvironment?.variables ?? {}) },
+      globals: { ...globals },
+      folder: folderVariables(collections, request.id),
+      envChanged: false,
+      globalsChanged: false,
+    };
+    const logs: string[] = [];
+    let testResults: TestResult[] = [];
+    let scriptError: string | undefined;
+
+    if (request.preRequestScript?.trim()) {
+      const pre = runPreRequest(request.preRequestScript, request, bridge);
+      logs.push(...pre.logs);
+      scriptError = pre.error;
+    }
+
+    let outgoing: ApiRequest = { ...request, environment: mergedVars(bridge) };
     const form = serializeFormBody(request);
     if (form) {
       outgoing = { ...outgoing, body: form.body, headers: upsertHeader(request.headers, "Content-Type", form.contentType) };
@@ -54,6 +80,7 @@ export function RestClient() {
     abortRef.current = controller;
     setLoading(true);
     setSentRequest(outgoing);
+    setScriptRun(undefined);
 
     const started = performance.now();
     let body = "";
@@ -84,14 +111,31 @@ export function RestClient() {
       controller.signal,
     );
 
+    const durationMs = Math.round(performance.now() - started);
     if (result.error && result.error !== "Aborted") {
       emit({ status: "Request failed", error: result.error });
     } else {
       emit({ status: result.error === "Aborted" ? `${status} (aborted)` : status });
-      const finalResponse: ApiResponse = { statusCode, status, headers, body, bodySize: body.length, durationMs: Math.round(performance.now() - started), receivedAt: new Date().toISOString(), resolvedUrl, sent };
+      const finalResponse: ApiResponse = { statusCode, status, headers, body, bodySize: body.length, durationMs, receivedAt: new Date().toISOString(), resolvedUrl, sent };
       addHistory({ id: crypto.randomUUID(), request: outgoing, response: finalResponse, createdAt: new Date().toISOString() });
+
+      // Post-response test script (only on a completed, non-aborted response).
+      if (!result.error && request.tests?.trim()) {
+        const testRun = runTests(request.tests, request, { code: statusCode, status, responseTime: durationMs, body, headers }, bridge);
+        logs.push(...testRun.logs);
+        testResults = testRun.tests;
+        scriptError = scriptError ?? testRun.error;
+      }
     }
 
+    // Persist any pm.environment.set()/pm.globals.set() so the next request sees the new values.
+    if (bridge.envChanged && activeEnvironment) {
+      updateEnvironment({ ...activeEnvironment, variables: bridge.env });
+    }
+    if (bridge.globalsChanged) {
+      updateGlobals(bridge.globals);
+    }
+    setScriptRun(logs.length || testResults.length || scriptError ? { tests: testResults, logs, error: scriptError } : undefined);
     setLoading(false);
     abortRef.current = null;
   };
@@ -177,7 +221,7 @@ export function RestClient() {
         </Panel>
         <Separator className="w-1 bg-line transition-colors hover:bg-accent/60" />
         <Panel defaultSize="42" minSize="25">
-          <ResponseViewer response={response} loading={loading && !response} sentRequest={sentRequest} />
+          <ResponseViewer response={response} loading={loading && !response} sentRequest={sentRequest} scriptRun={scriptRun} />
         </Panel>
       </Group>
     </div>
@@ -191,6 +235,21 @@ type TabPanelProps = {
 };
 
 function RequestTabPanel({ activeTab, request, updateRequest }: TabPanelProps) {
+  // Hooks must run unconditionally, before the per-tab early returns.
+  const bodyEditorRef = useRef<{ getAction?: (id: string) => { run?: () => void } | null } | null>(null);
+  const [scriptTab, setScriptTab] = useState<"pre" | "test">("test");
+  const formatBody = () => {
+    if (request.bodyType === "json") {
+      try {
+        updateRequest({ body: JSON.stringify(JSON.parse(request.body), null, 2) });
+        return;
+      } catch {
+        // fall through to Monaco's formatter, which surfaces the parse error in-editor
+      }
+    }
+    bodyEditorRef.current?.getAction?.("editor.action.formatDocument")?.run?.();
+  };
+
   if (activeTab === "Params") {
     return <HeaderTable title="Query Params" rows={request.queryParams} onChange={(queryParams) => updateRequest({ queryParams })} fill />;
   }
@@ -243,20 +302,29 @@ function RequestTabPanel({ activeTab, request, updateRequest }: TabPanelProps) {
   }
 
   if (activeTab === "Tests") {
+    const isPre = scriptTab === "pre";
     return (
       <div className="flex h-full min-h-0 flex-col">
         <div className="flex h-10 shrink-0 items-center justify-between border-b border-line px-3 text-sm text-slate-400">
-          <span>Tests</span>
-          <span className="text-xs text-slate-600">JavaScript assertions</span>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setScriptTab("pre")} className={`rounded-md px-2.5 py-1 text-xs ${isPre ? "bg-panel text-accent" : "text-slate-400 hover:bg-panel"}`}>
+              Pre-request{request.preRequestScript?.trim() ? " ●" : ""}
+            </button>
+            <button onClick={() => setScriptTab("test")} className={`rounded-md px-2.5 py-1 text-xs ${!isPre ? "bg-panel text-accent" : "text-slate-400 hover:bg-panel"}`}>
+              Test{request.tests?.trim() ? " ●" : ""}
+            </button>
+          </div>
+          <span className="text-xs text-slate-600">{isPre ? "Runs before send — pm.environment.set(…)" : "Runs after response — pm.test / pm.expect"}</span>
         </div>
         <div className="relative min-h-0 flex-1">
           <Editor
+            key={scriptTab}
             height="100%"
             language="javascript"
             theme="vs-dark"
-            value={request.tests}
+            value={isPre ? request.preRequestScript ?? "" : request.tests}
             options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: "on", padding: { top: 12 } }}
-            onChange={(tests) => updateRequest({ tests: tests ?? "" })}
+            onChange={(value) => updateRequest(isPre ? { preRequestScript: value ?? "" } : { tests: value ?? "" })}
           />
         </div>
       </div>
@@ -264,18 +332,6 @@ function RequestTabPanel({ activeTab, request, updateRequest }: TabPanelProps) {
   }
 
   const isForm = request.bodyType === "form" || request.bodyType === "multipart";
-  const bodyEditorRef = useRef<{ getAction?: (id: string) => { run?: () => void } | null } | null>(null);
-  const formatBody = () => {
-    if (request.bodyType === "json") {
-      try {
-        updateRequest({ body: JSON.stringify(JSON.parse(request.body), null, 2) });
-        return;
-      } catch {
-        // fall through to Monaco's formatter, which surfaces the parse error in-editor
-      }
-    }
-    bodyEditorRef.current?.getAction?.("editor.action.formatDocument")?.run?.();
-  };
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-line px-3 text-sm text-slate-400">

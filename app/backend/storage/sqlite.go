@@ -35,6 +35,7 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	_ = ensureColumn(db, "collections", "request_json", "text")
+	_ = ensureColumn(db, "collections", "variables_json", "text")
 
 	return db, nil
 }
@@ -47,17 +48,18 @@ type StoredHistory struct {
 }
 
 type StoredCollection struct {
-	ID          string
-	ParentID    string
-	Kind        string
-	Name        string
-	Method      string
-	URL         string
-	TagsJSON    string
-	Favorite    bool
-	RequestJSON string
-	CreatedAt   string
-	UpdatedAt   string
+	ID            string
+	ParentID      string
+	Kind          string
+	Name          string
+	Method        string
+	URL           string
+	TagsJSON      string
+	Favorite      bool
+	RequestJSON   string
+	VariablesJSON string
+	CreatedAt     string
+	UpdatedAt     string
 }
 
 func UpsertCollection(db *sql.DB, collection StoredCollection) error {
@@ -71,8 +73,8 @@ func UpsertCollection(db *sql.DB, collection StoredCollection) error {
 	}
 
 	_, err := db.Exec(
-		`insert into collections (id, parent_id, kind, name, method, url, tags_json, favorite, request_json, created_at, updated_at)
-		 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`insert into collections (id, parent_id, kind, name, method, url, tags_json, favorite, request_json, variables_json, created_at, updated_at)
+		 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 on conflict(id) do update set
 			parent_id = excluded.parent_id,
 			kind = excluded.kind,
@@ -82,6 +84,7 @@ func UpsertCollection(db *sql.DB, collection StoredCollection) error {
 			tags_json = excluded.tags_json,
 			favorite = excluded.favorite,
 			request_json = excluded.request_json,
+			variables_json = excluded.variables_json,
 			updated_at = excluded.updated_at`,
 		collection.ID,
 		collection.ParentID,
@@ -92,6 +95,7 @@ func UpsertCollection(db *sql.DB, collection StoredCollection) error {
 		collection.TagsJSON,
 		collection.Favorite,
 		collection.RequestJSON,
+		collection.VariablesJSON,
 		collection.CreatedAt,
 		collection.UpdatedAt,
 	)
@@ -112,8 +116,8 @@ func UpsertCollections(db *sql.DB, collections []StoredCollection) error {
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	stmt, err := tx.Prepare(
-		`insert into collections (id, parent_id, kind, name, method, url, tags_json, favorite, request_json, created_at, updated_at)
-		 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`insert into collections (id, parent_id, kind, name, method, url, tags_json, favorite, request_json, variables_json, created_at, updated_at)
+		 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 on conflict(id) do update set
 			parent_id = excluded.parent_id,
 			kind = excluded.kind,
@@ -123,6 +127,7 @@ func UpsertCollections(db *sql.DB, collections []StoredCollection) error {
 			tags_json = excluded.tags_json,
 			favorite = excluded.favorite,
 			request_json = excluded.request_json,
+			variables_json = excluded.variables_json,
 			updated_at = excluded.updated_at`,
 	)
 	if err != nil {
@@ -141,7 +146,7 @@ func UpsertCollections(db *sql.DB, collections []StoredCollection) error {
 		if _, err := stmt.Exec(
 			collection.ID, collection.ParentID, collection.Kind, collection.Name,
 			collection.Method, collection.URL, collection.TagsJSON, collection.Favorite,
-			collection.RequestJSON, collection.CreatedAt, collection.UpdatedAt,
+			collection.RequestJSON, collection.VariablesJSON, collection.CreatedAt, collection.UpdatedAt,
 		); err != nil {
 			return err
 		}
@@ -151,7 +156,7 @@ func UpsertCollections(db *sql.DB, collections []StoredCollection) error {
 
 func ListCollections(db *sql.DB) ([]StoredCollection, error) {
 	rows, err := db.Query(
-		`select id, coalesce(parent_id, ''), kind, name, coalesce(method, ''), coalesce(url, ''), tags_json, favorite, coalesce(request_json, ''), created_at, updated_at
+		`select id, coalesce(parent_id, ''), kind, name, coalesce(method, ''), coalesce(url, ''), tags_json, favorite, coalesce(request_json, ''), coalesce(variables_json, ''), created_at, updated_at
 		   from collections
 		  order by kind = 'workspace' desc, name asc`,
 	)
@@ -173,6 +178,7 @@ func ListCollections(db *sql.DB) ([]StoredCollection, error) {
 			&collection.TagsJSON,
 			&collection.Favorite,
 			&collection.RequestJSON,
+			&collection.VariablesJSON,
 			&collection.CreatedAt,
 			&collection.UpdatedAt,
 		); err != nil {

@@ -1,4 +1,5 @@
 import type { ApiRequest } from "../types/api";
+import { applyDynamicVars } from "./dynamicVars";
 
 export const snippetLanguages = ["curl", "javascript", "typescript", "go", "python", "rust", "java", "kotlin", "csharp"] as const;
 export type SnippetLanguage = (typeof snippetLanguages)[number];
@@ -273,7 +274,8 @@ function contentType(bodyType: ApiRequest["bodyType"]): string {
 }
 
 function resolveVars(value: string, variables: Record<string, {text: string; fileName?: string; type: string;}>): string {
-  return Object.entries(variables).reduce((next, [key, variable]) => next.replaceAll(`{{${key}}}`, variable.text), value);
+  const withEnv = Object.entries(variables).reduce((next, [key, variable]) => next.replaceAll(`{{${key}}}`, variable.text), value);
+  return applyDynamicVars(withEnv);
 }
 
 function applyQuery(url: string, params: ApiRequest["queryParams"], env: Record<string, {text: string; fileName?: string; type: string;}>): string {

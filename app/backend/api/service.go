@@ -3,15 +3,18 @@ package api
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -301,59 +304,57 @@ func (s *AppService) ListHistory(query string) []HistoryEntry {
 	return entries
 }
 
-func (s *AppService) SaveCollection(collection Collection) error {
+func storedFromCollection(collection Collection) (storage.StoredCollection, error) {
 	tagsJSON, err := json.Marshal(collection.Tags)
 	if err != nil {
-		return err
+		return storage.StoredCollection{}, err
 	}
 	requestJSON := ""
 	if collection.Request != nil {
 		payload, err := json.Marshal(collection.Request)
 		if err != nil {
-			return err
+			return storage.StoredCollection{}, err
 		}
 		requestJSON = string(payload)
 	}
+	variablesJSON := ""
+	if len(collection.Variables) > 0 {
+		payload, err := json.Marshal(collection.Variables)
+		if err != nil {
+			return storage.StoredCollection{}, err
+		}
+		variablesJSON = string(payload)
+	}
+	return storage.StoredCollection{
+		ID:            collection.ID,
+		ParentID:      collection.ParentID,
+		Kind:          collection.Kind,
+		Name:          collection.Name,
+		Method:        collection.Method,
+		URL:           collection.URL,
+		TagsJSON:      string(tagsJSON),
+		Favorite:      collection.Favorite,
+		RequestJSON:   requestJSON,
+		VariablesJSON: variablesJSON,
+	}, nil
+}
 
-	return storage.UpsertCollection(s.db, storage.StoredCollection{
-		ID:          collection.ID,
-		ParentID:    collection.ParentID,
-		Kind:        collection.Kind,
-		Name:        collection.Name,
-		Method:      collection.Method,
-		URL:         collection.URL,
-		TagsJSON:    string(tagsJSON),
-		Favorite:    collection.Favorite,
-		RequestJSON: requestJSON,
-	})
+func (s *AppService) SaveCollection(collection Collection) error {
+	stored, err := storedFromCollection(collection)
+	if err != nil {
+		return err
+	}
+	return storage.UpsertCollection(s.db, stored)
 }
 
 func (s *AppService) SaveCollections(collections []Collection) error {
 	stored := make([]storage.StoredCollection, 0, len(collections))
 	for _, collection := range collections {
-		tagsJSON, err := json.Marshal(collection.Tags)
+		item, err := storedFromCollection(collection)
 		if err != nil {
 			return err
 		}
-		requestJSON := ""
-		if collection.Request != nil {
-			payload, err := json.Marshal(collection.Request)
-			if err != nil {
-				return err
-			}
-			requestJSON = string(payload)
-		}
-		stored = append(stored, storage.StoredCollection{
-			ID:          collection.ID,
-			ParentID:    collection.ParentID,
-			Kind:        collection.Kind,
-			Name:        collection.Name,
-			Method:      collection.Method,
-			URL:         collection.URL,
-			TagsJSON:    string(tagsJSON),
-			Favorite:    collection.Favorite,
-			RequestJSON: requestJSON,
-		})
+		stored = append(stored, item)
 	}
 	return storage.UpsertCollections(s.db, stored)
 }
@@ -385,6 +386,10 @@ func (s *AppService) ListCollections() []Collection {
 				request = &parsed
 			}
 		}
+		var variables map[string]EnvironmentValue
+		if item.VariablesJSON != "" {
+			_ = json.Unmarshal([]byte(item.VariablesJSON), &variables)
+		}
 		createdAt, _ := time.Parse(time.RFC3339Nano, item.CreatedAt)
 		updatedAt, _ := time.Parse(time.RFC3339Nano, item.UpdatedAt)
 		collections = append(collections, Collection{
@@ -397,6 +402,7 @@ func (s *AppService) ListCollections() []Collection {
 			Tags:      tags,
 			Favorite:  item.Favorite,
 			Request:   request,
+			Variables: variables,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
 		})
@@ -746,7 +752,63 @@ func resolveVariables(value string, variables map[string]EnvironmentValue) strin
 		}
 		resolved = strings.ReplaceAll(resolved, placeholder, variableValue(variables[key]))
 	}
-	return resolved
+	return applyDynamicVariables(resolved)
+}
+
+var dynamicVarRe = regexp.MustCompile(`\{\{\$(\w+)\}\}`)
+
+// applyDynamicVariables resolves Postman-style dynamic placeholders ({{$guid}}, {{$timestamp}}…)
+// at send time. Unknown names are left untouched. Each occurrence is generated independently.
+func applyDynamicVariables(value string) string {
+	if !strings.Contains(value, "{{$") {
+		return value
+	}
+	return dynamicVarRe.ReplaceAllStringFunc(value, func(match string) string {
+		name := dynamicVarRe.FindStringSubmatch(match)[1]
+		if out, ok := dynamicValue(name); ok {
+			return out
+		}
+		return match
+	})
+}
+
+func dynamicValue(name string) (string, bool) {
+	firstNames := []string{"Ada", "Linus", "Grace", "Alan", "Dennis", "Margaret", "Ken", "Barbara"}
+	lastNames := []string{"Lovelace", "Torvalds", "Hopper", "Turing", "Ritchie", "Hamilton", "Thompson", "Liskov"}
+	switch name {
+	case "guid", "randomUUID":
+		return newUUIDv4(), true
+	case "timestamp":
+		return fmt.Sprintf("%d", time.Now().Unix()), true
+	case "isoTimestamp":
+		return time.Now().UTC().Format(time.RFC3339), true
+	case "randomInt":
+		return fmt.Sprintf("%d", rand.Intn(1001)), true
+	case "randomBoolean":
+		return fmt.Sprintf("%t", rand.Intn(2) == 1), true
+	case "randomFirstName":
+		return firstNames[rand.Intn(len(firstNames))], true
+	case "randomLastName":
+		return lastNames[rand.Intn(len(lastNames))], true
+	case "randomFullName":
+		return firstNames[rand.Intn(len(firstNames))] + " " + lastNames[rand.Intn(len(lastNames))], true
+	case "randomEmail":
+		return fmt.Sprintf("%s.%s%d@example.com", strings.ToLower(firstNames[rand.Intn(len(firstNames))]), strings.ToLower(lastNames[rand.Intn(len(lastNames))]), rand.Intn(1000)), true
+	case "randomUserName":
+		return fmt.Sprintf("%s_%d", strings.ToLower(firstNames[rand.Intn(len(firstNames))]), rand.Intn(1000)), true
+	case "randomColor":
+		return []string{"red", "green", "blue", "yellow", "purple", "cyan"}[rand.Intn(6)], true
+	default:
+		return "", false
+	}
+}
+
+func newUUIDv4() string {
+	b := make([]byte, 16)
+	_, _ = crand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // variableValue returns the substitution for a variable. File-backed variables store a path

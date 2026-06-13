@@ -37,18 +37,19 @@ func (e *EnvironmentValue) UnmarshalJSON(data []byte) error {
 }
 
 type RequestInput struct {
-	ID          string                      `json:"id"`
-	Name        string                      `json:"name"`
-	Method      string                      `json:"method"`
-	URL         string                      `json:"url"`
-	QueryParams []Header                    `json:"queryParams"`
-	Headers     []Header                    `json:"headers"`
-	BodyType    string                      `json:"bodyType"`
-	Body        string                      `json:"body"`
-	Auth        map[string]string           `json:"auth"`
-	Tests       string                      `json:"tests"`
-	Environment map[string]EnvironmentValue `json:"environment"`
-	TimeoutMS   int                         `json:"timeoutMs"`
+	ID               string                      `json:"id"`
+	Name             string                      `json:"name"`
+	Method           string                      `json:"method"`
+	URL              string                      `json:"url"`
+	QueryParams      []Header                    `json:"queryParams"`
+	Headers          []Header                    `json:"headers"`
+	BodyType         string                      `json:"bodyType"`
+	Body             string                      `json:"body"`
+	Auth             map[string]string           `json:"auth"`
+	PreRequestScript string                      `json:"preRequestScript"`
+	Tests            string                      `json:"tests"`
+	Environment      map[string]EnvironmentValue `json:"environment"`
+	TimeoutMS        int                         `json:"timeoutMs"`
 }
 
 type FilePick struct {
@@ -83,11 +84,12 @@ type Collection struct {
 	Kind      string        `json:"kind"`
 	Method    string        `json:"method,omitempty"`
 	URL       string        `json:"url,omitempty"`
-	Tags      []string      `json:"tags"`
-	Favorite  bool          `json:"favorite"`
-	Request   *RequestInput `json:"request,omitempty"`
-	CreatedAt time.Time     `json:"createdAt"`
-	UpdatedAt time.Time     `json:"updatedAt"`
+	Tags      []string                    `json:"tags"`
+	Favorite  bool                        `json:"favorite"`
+	Request   *RequestInput               `json:"request,omitempty"`
+	Variables map[string]EnvironmentValue `json:"variables,omitempty"`
+	CreatedAt time.Time                   `json:"createdAt"`
+	UpdatedAt time.Time                   `json:"updatedAt"`
 }
 
 type Environment struct {

@@ -5,6 +5,7 @@ import { AppService } from "../../bindings/github.com/omurilo/yarc/app/backend/a
 import { Events } from "@wailsio/runtime";
 import { buildSnippet } from "./snippets";
 import { downloadFile } from "./download";
+import { applyDynamicVars } from "./dynamicVars";
 
 const inWails = typeof window !== "undefined" && window.location.protocol === "wails:";
 
@@ -348,7 +349,8 @@ function parseProtoMethods(source: string): GrpcMethodList["methods"] {
 }
 
 function resolveVariables(value: string, variables: Record<string, { text: string; type: string; fileName?: string; }> | undefined) {
-  return Object.entries(variables ?? {}).reduce((next, [key, variable]) => next.replaceAll(`{{${key}}}`, variable.text), value ?? "");
+  const withEnv = Object.entries(variables ?? {}).reduce((next, [key, variable]) => next.replaceAll(`{{${key}}}`, variable.text), value ?? "");
+  return applyDynamicVars(withEnv);
 }
 
 function applyQuery(url: string, params: ApiRequest["queryParams"]) {

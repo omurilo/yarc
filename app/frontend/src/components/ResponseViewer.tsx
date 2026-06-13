@@ -3,6 +3,7 @@ import { AlertTriangle, Check, CheckCircle2, ChevronRight, Clipboard, Clock3, Fi
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { downloadFile } from "../services/download";
 import { applyJsonFilter } from "../services/jsonFilter";
+import type { ScriptOutcome } from "../services/scripting";
 import { resolveRequestPreview } from "../services/snippets";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 import type { ApiRequest, ApiResponse, HistoryEntry } from "../types/api";
@@ -11,12 +12,13 @@ type Props = {
   response?: ApiResponse;
   loading: boolean;
   sentRequest?: ApiRequest;
+  scriptRun?: ScriptOutcome;
 };
 
-const tabs = ["Response", "Headers", "Request"] as const;
+const tabs = ["Response", "Headers", "Request", "Tests"] as const;
 type Tab = (typeof tabs)[number];
 
-export function ResponseViewer({ response, loading, sentRequest }: Props) {
+export function ResponseViewer({ response, loading, sentRequest, scriptRun }: Props) {
   const [tab, setTab] = useState<Tab>("Response");
   const [filter, setFilter] = useState("");
   const [raw, setRaw] = useState(false);
@@ -47,6 +49,8 @@ export function ResponseViewer({ response, loading, sentRequest }: Props) {
     return null;
   }, [response, sentRequest]);
   const responseHeaders = useMemo(() => Object.entries(response?.headers ?? {}), [response]);
+  const testTotal = scriptRun?.tests.length ?? 0;
+  const testsPassed = scriptRun?.tests.filter((test) => test.passed).length ?? 0;
 
   const contentType = (response?.headers["Content-Type"] ?? response?.headers["content-type"] ?? "").toLowerCase();
   const isSse = contentType.includes("text/event-stream");
@@ -107,6 +111,11 @@ export function ResponseViewer({ response, loading, sentRequest }: Props) {
           >
             {label}
             {label === "Headers" && responseHeaders.length > 0 && <span className="ml-1 text-slate-500">{responseHeaders.length}</span>}
+            {label === "Tests" && testTotal > 0 && (
+              <span className={`ml-1 ${testsPassed === testTotal ? "text-accent" : "text-danger"}`}>
+                {testsPassed}/{testTotal}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -245,6 +254,48 @@ export function ResponseViewer({ response, loading, sentRequest }: Props) {
                   <div className="min-h-0">
                     <div className="mb-1 uppercase tracking-wide text-slate-500">Body</div>
                     <pre className="overflow-auto rounded-md border border-line bg-panel p-3 font-mono text-slate-200">{inspected.body}</pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "Tests" && (
+          <div className="h-full overflow-auto p-4">
+            {!scriptRun ? (
+              <div className="text-sm text-slate-500">No scripts ran. Add a pre-request or test script under the request's Tests tab.</div>
+            ) : (
+              <div className="grid gap-4">
+                {testTotal > 0 && (
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="rounded bg-accent/20 px-2 py-0.5 font-semibold text-accent">{testsPassed} passed</span>
+                    {testsPassed < testTotal && <span className="rounded bg-danger/20 px-2 py-0.5 font-semibold text-danger">{testTotal - testsPassed} failed</span>}
+                  </div>
+                )}
+                {scriptRun.error && (
+                  <div className="flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <span className="break-all font-mono">Script error: {scriptRun.error}</span>
+                  </div>
+                )}
+                {scriptRun.tests.length > 0 && (
+                  <div className="grid gap-1">
+                    {scriptRun.tests.map((test, index) => (
+                      <div key={index} className="flex items-start gap-2 rounded-md border border-line/60 bg-panel px-3 py-2 text-sm">
+                        {test.passed ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-accent" /> : <AlertTriangle size={15} className="mt-0.5 shrink-0 text-danger" />}
+                        <div className="min-w-0">
+                          <div className={test.passed ? "text-slate-200" : "text-danger"}>{test.name}</div>
+                          {test.error && <div className="mt-0.5 break-all font-mono text-xs text-slate-500">{test.error}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {scriptRun.logs.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wide text-slate-500">Console</div>
+                    <pre className="overflow-auto rounded-md border border-line bg-[#14181f] p-3 font-mono text-xs text-slate-300">{scriptRun.logs.join("\n")}</pre>
                   </div>
                 )}
               </div>

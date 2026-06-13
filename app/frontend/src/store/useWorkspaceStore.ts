@@ -24,6 +24,7 @@ type WorkspaceState = {
   activeResponse?: ApiResponse;
   history: HistoryEntry[];
   environments: Environment[];
+  globals: Record<string, { text: string; type: string; fileName?: string }>;
   activeEnvironmentId: string;
   collections: CollectionNode[];
   selectedCollectionId: string;
@@ -48,6 +49,8 @@ type WorkspaceState = {
   importRequest: (request: ApiRequest, parentId?: string) => void;
   importCollections: (nodes: CollectionNode[]) => void;
   importEnvironments: (environments: Environment[]) => void;
+  updateGlobals: (variables: WorkspaceState["globals"]) => void;
+  setFolderVariables: (id: string, variables: WorkspaceState["globals"]) => void;
   setActiveEnvironment: (id: string) => void;
   addEnvironment: () => void;
   updateEnvironment: (environment: Environment) => void;
@@ -61,13 +64,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   history: [],
   activeEnvironmentId: "local",
   environments: [],
+  globals: {},
   collections: [{ id: "workspace", kind: "workspace", name: "Workspace", tags: [], favorite: false }],
   selectedCollectionId: "workspace",
   hydrate: (bootstrap) => {
-    const activeEnvironment = bootstrap.environments.find((env) => env.active) ?? bootstrap.environments[0];
+    // "globals" is persisted as a special environment row; pull it out of the env list so it
+    // doesn't show in the environment switcher.
+    const globalsEnv = bootstrap.environments.find((env) => env.id === "globals");
+    const environments = bootstrap.environments.filter((env) => env.id !== "globals");
+    const activeEnvironment = environments.find((env) => env.active) ?? environments[0];
     set({
       collections: bootstrap.collections.length > 0 ? bootstrap.collections : get().collections,
-      environments: bootstrap.environments,
+      environments,
+      globals: globalsEnv?.variables ?? {},
       history: bootstrap.history,
       activeEnvironmentId: activeEnvironment?.id ?? "local",
     });
@@ -264,6 +273,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (environments.length === 0) return;
     set({ environments: [...get().environments, ...environments] });
     environments.forEach((environment) => void saveEnvironment(environment));
+  },
+  updateGlobals: (variables) => {
+    set({ globals: variables });
+    void saveEnvironment({ id: "globals", name: "Globals", variables, secrets: [], active: false });
+  },
+  setFolderVariables: (id, variables) => {
+    const collections = get().collections.map((node) => (node.id === id ? { ...node, variables } : node));
+    set({ collections });
+    const updated = collections.find((node) => node.id === id);
+    if (updated) void saveCollection(updated);
   },
   setActiveEnvironment: (id) => {
     const environments = get().environments.map((env) => ({ ...env, active: env.id === id }));
