@@ -1,5 +1,5 @@
 import { Boxes, Braces, Clock3, GitBranch, RadioTower, Search, TerminalSquare } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 
 const commands = [
@@ -19,6 +19,13 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => commands.filter((command) => command.label.toLowerCase().includes(query.toLowerCase())), [query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, setOpen]);
 
   if (!open) return null;
 

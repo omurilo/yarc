@@ -1,4 +1,4 @@
-import { Activity, Boxes, Braces, Clock3, Download, GitBranch, RadioTower, Search, Settings, Sparkles, TerminalSquare, Upload } from "lucide-react";
+import { Activity, Boxes, Braces, Clock3, Download, GitBranch, RadioTower, Search, Settings, TerminalSquare, Upload } from "lucide-react";
 import { useState } from "react";
 import { CollectionTree } from "../components/CollectionTree";
 import { EnvironmentSwitcher } from "../components/EnvironmentSwitcher";
@@ -54,9 +54,6 @@ export function AppShell() {
           })}
         </div>
         <div className="flex flex-col gap-2">
-          <button className="grid h-10 w-10 place-items-center rounded-md text-slate-400 hover:bg-panel hover:text-slate-100" title="AI tools">
-            <Sparkles size={18} />
-          </button>
           <button
             className={`grid h-10 w-10 place-items-center rounded-md transition ${activeView === "settings" ? "bg-panel text-accent shadow-focus" : "text-slate-400 hover:bg-panel hover:text-slate-100"}`}
             title="Settings"

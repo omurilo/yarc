@@ -1,4 +1,4 @@
-import { ChevronRight, FilePlus2, Folder, FolderOpen, FolderPlus, Pencil, Search, Star, Tag, Trash2 } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FilePlus2, Folder, FolderOpen, FolderPlus, Pencil, Search, Star, Tag, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import type { CollectionNode } from "../types/api";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
@@ -15,7 +15,15 @@ export function CollectionTree() {
   const openCollectionRequest = useWorkspaceStore((state) => state.openCollectionRequest);
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Persist which folders are collapsed so the tree reopens in the same state next session.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("yarc.collapsed") ?? "[]");
+      return new Set(Array.isArray(stored) ? (stored as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ node: CollectionNode; x: number; y: number } | null>(null);
@@ -51,12 +59,21 @@ export function CollectionTree() {
   const childrenFor = (parentId: string) => visible.filter((node) => node.parentId === parentId).sort(sortCollections);
   const roots = childrenFor("workspace");
 
+  const persistCollapsed = (next: Set<string>) => {
+    localStorage.setItem("yarc.collapsed", JSON.stringify([...next]));
+    return next;
+  };
+
   const toggleCollapsed = (id: string) =>
     setCollapsed((current) => {
       const next = new Set(current);
       next.has(id) ? next.delete(id) : next.add(id);
-      return next;
+      return persistCollapsed(next);
     });
+
+  const folderIds = useMemo(() => collections.filter((node) => node.kind === "folder").map((node) => node.id), [collections]);
+  const allCollapsed = folderIds.length > 0 && folderIds.every((id) => collapsed.has(id));
+  const toggleCollapseAll = () => setCollapsed(() => persistCollapsed(new Set(allCollapsed ? [] : folderIds)));
 
   const onDrop = (event: DragEvent, targetId: string) => {
     event.preventDefault();
@@ -90,6 +107,18 @@ export function CollectionTree() {
           </button>
         </div>
       </div>
+      {folderIds.length > 0 && (
+        <div className="flex items-center justify-between px-3 pb-1">
+          <span className="text-xs uppercase tracking-wide text-slate-500">Collections</span>
+          <button
+            onClick={toggleCollapseAll}
+            title={allCollapsed ? "Expand all folders" : "Collapse all folders"}
+            className="grid h-6 w-6 place-items-center rounded text-slate-400 hover:bg-panel hover:text-slate-100"
+          >
+            {allCollapsed ? <ChevronsUpDown size={15} /> : <ChevronsDownUp size={15} />}
+          </button>
+        </div>
+      )}
       <div
         className={`flex-1 overflow-auto px-2 pb-3 ${dropTarget === "workspace" ? "rounded-md ring-1 ring-inset ring-accent/40" : ""}`}
         onDragOver={(event) => {

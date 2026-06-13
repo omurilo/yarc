@@ -762,6 +762,21 @@ func variableValue(value EnvironmentValue) string {
 	return value.Text
 }
 
+// SaveResponseFile opens a native save dialog and writes content to the chosen path. Returns
+// true if written (false if cancelled/failed). WKWebView ignores anchor/blob downloads, so the
+// frontend routes "download response" through here.
+func (s *AppService) SaveResponseFile(name string, content string) bool {
+	app := application.Get()
+	if app == nil {
+		return false
+	}
+	path, err := app.Dialog.SaveFile().SetFilename(name).PromptForSingleSelection()
+	if err != nil || path == "" {
+		return false
+	}
+	return os.WriteFile(path, []byte(content), 0o644) == nil
+}
+
 // PickFile opens a native file picker and returns the selected path (and its base name), for
 // linking an environment variable to a file on disk.
 func (s *AppService) PickFile() FilePick {

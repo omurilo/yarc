@@ -1,13 +1,12 @@
 import Editor from "@monaco-editor/react";
-import { Copy, Download, Play, Save, Square, WandSparkles } from "lucide-react";
+import { Braces, Copy, Download, Play, Save, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { FormEditor } from "../components/FormEditor";
 import { HeaderTable } from "../components/HeaderTable";
 import { ResponseViewer } from "../components/ResponseViewer";
 import { SnippetPanel } from "../components/SnippetPanel";
-import { streamHttpRequest } from "../services/apiClient";
-import { downloadFile } from "../services/download";
+import { saveResponseFile, streamHttpRequest } from "../services/apiClient";
 import { serializeFormBody, upsertHeader } from "../services/formBody";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 import type { ApiRequest, ApiResponse, HttpMethod } from "../types/api";
@@ -101,7 +100,7 @@ export function RestClient() {
     if (!response) return;
     const contentType = response.headers["Content-Type"] ?? response.headers["content-type"] ?? "text/plain";
     const extension = contentType.includes("json") ? "json" : contentType.includes("xml") ? "xml" : contentType.includes("html") ? "html" : "txt";
-    downloadFile(`${(request.name || "response").replace(/\s+/g, "-").toLowerCase()}.${extension}`, response.body, contentType);
+    void saveResponseFile(`${(request.name || "response").replace(/\s+/g, "-").toLowerCase()}.${extension}`, response.body, contentType);
   };
 
   return (
@@ -151,9 +150,6 @@ export function RestClient() {
             </button>
           ))}
           <div className="ml-auto flex gap-1">
-            <button title="Generate tests with AI" className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-panel hover:text-accent">
-              <WandSparkles size={16} />
-            </button>
             <button title="Save request" onClick={saveActiveRequest} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-panel hover:text-slate-100">
               <Save size={16} />
             </button>
@@ -268,17 +264,42 @@ function RequestTabPanel({ activeTab, request, updateRequest }: TabPanelProps) {
   }
 
   const isForm = request.bodyType === "form" || request.bodyType === "multipart";
+  const bodyEditorRef = useRef<{ getAction?: (id: string) => { run?: () => void } | null } | null>(null);
+  const formatBody = () => {
+    if (request.bodyType === "json") {
+      try {
+        updateRequest({ body: JSON.stringify(JSON.parse(request.body), null, 2) });
+        return;
+      } catch {
+        // fall through to Monaco's formatter, which surfaces the parse error in-editor
+      }
+    }
+    bodyEditorRef.current?.getAction?.("editor.action.formatDocument")?.run?.();
+  };
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-line px-3 text-sm text-slate-400">
         <span>Payload</span>
-        <select value={request.bodyType} onChange={(event) => updateRequest({ bodyType: event.target.value as ApiRequest["bodyType"] })} className="h-7 rounded-md border border-line bg-panel px-2 outline-none">
-          <option value="json">JSON</option>
-          <option value="xml">XML</option>
-          <option value="text">Text</option>
-          <option value="form">Form URL Encoded</option>
-          <option value="multipart">Multipart</option>
-        </select>
+        <div className="flex items-center gap-2">
+          {!isForm && (
+            <button
+              onClick={formatBody}
+              disabled={!request.body}
+              title="Format document"
+              className="flex h-7 items-center gap-1 rounded-md border border-line bg-panel px-2 text-xs text-slate-300 hover:border-accent hover:text-accent disabled:opacity-40"
+            >
+              <Braces size={13} />
+              Format
+            </button>
+          )}
+          <select value={request.bodyType} onChange={(event) => updateRequest({ bodyType: event.target.value as ApiRequest["bodyType"] })} className="h-7 rounded-md border border-line bg-panel px-2 outline-none">
+            <option value="json">JSON</option>
+            <option value="xml">XML</option>
+            <option value="text">Text</option>
+            <option value="form">Form URL Encoded</option>
+            <option value="multipart">Multipart</option>
+          </select>
+        </div>
       </div>
       {isForm ? (
         <FormEditor rows={request.formFields ?? []} allowFiles={request.bodyType === "multipart"} onChange={(formFields) => updateRequest({ formFields })} />
@@ -289,6 +310,7 @@ function RequestTabPanel({ activeTab, request, updateRequest }: TabPanelProps) {
             language={request.bodyType === "json" ? "json" : request.bodyType === "xml" ? "xml" : "plaintext"}
             theme="vs-dark"
             value={request.body}
+            onMount={(editor) => (bodyEditorRef.current = editor)}
             options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: "on", padding: { top: 12 } }}
             onChange={(body) => updateRequest({ body: body ?? "" })}
           />

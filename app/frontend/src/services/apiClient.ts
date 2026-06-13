@@ -4,6 +4,7 @@ import type { ApiRequest, ApiResponse, CollectionNode, Environment, GrpcInvokeRe
 import { AppService } from "../../bindings/github.com/omurilo/yarc/app/backend/api";
 import { Events } from "@wailsio/runtime";
 import { buildSnippet } from "./snippets";
+import { downloadFile } from "./download";
 
 const inWails = typeof window !== "undefined" && window.location.protocol === "wails:";
 
@@ -73,6 +74,16 @@ export async function pickEnvFile(): Promise<{ path: string; name: string } | nu
     return result?.path ? { path: result.path, name: result.name } : null;
   }
   return null;
+}
+
+// Saves text content to a file. In the desktop app this opens a native save dialog (WKWebView
+// ignores anchor/blob downloads); in the browser preview it falls back to a blob download.
+export async function saveResponseFile(name: string, content: string, mime = "application/octet-stream"): Promise<boolean> {
+  if (wailsService()?.SaveResponseFile) {
+    return wailsService()!.SaveResponseFile(name, content);
+  }
+  downloadFile(name, content, mime);
+  return true;
 }
 
 export async function saveEnvironment(environment: Environment): Promise<void> {
