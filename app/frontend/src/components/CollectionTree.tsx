@@ -1,7 +1,8 @@
-import { Braces, ChevronRight, ChevronsDownUp, ChevronsUpDown, FilePlus2, Folder, FolderOpen, FolderPlus, Pencil, Plus, Search, Star, Tag, Trash2, X } from "lucide-react";
+import { Braces, ChevronRight, ChevronsDownUp, ChevronsUpDown, FilePlus2, Folder, FolderOpen, FolderPlus, Pencil, Play, Plus, Search, Star, Tag, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import type { CollectionNode } from "../types/api";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
+import { CollectionRunner } from "./CollectionRunner";
 
 export function CollectionTree() {
   const collections = useWorkspaceStore((state) => state.collections);
@@ -29,6 +30,7 @@ export function CollectionTree() {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ node: CollectionNode; x: number; y: number } | null>(null);
   const [varsFolder, setVarsFolder] = useState<CollectionNode | null>(null);
+  const [runFolder, setRunFolder] = useState<string | null>(null);
 
   useEffect(() => {
     const close = () => setMenu(null);
@@ -194,16 +196,28 @@ export function CollectionTree() {
             New folder
           </button>
           {menu.node.kind === "folder" && (
-            <button
-              onClick={() => {
-                setVarsFolder(menu.node);
-                setMenu(null);
-              }}
-              className="flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-[#2a303a]"
-            >
-              <Braces size={14} />
-              Variables…
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  setRunFolder(menu.node.id);
+                  setMenu(null);
+                }}
+                className="flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-[#2a303a]"
+              >
+                <Play size={14} />
+                Run folder…
+              </button>
+              <button
+                onClick={() => {
+                  setVarsFolder(menu.node);
+                  setMenu(null);
+                }}
+                className="flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-[#2a303a]"
+              >
+                <Braces size={14} />
+                Variables…
+              </button>
+            </>
           )}
           <div className="my-1 border-t border-line" />
           <button
@@ -228,6 +242,7 @@ export function CollectionTree() {
           }}
         />
       )}
+      <CollectionRunner folderId={runFolder} onClose={() => setRunFolder(null)} />
     </div>
   );
 }
