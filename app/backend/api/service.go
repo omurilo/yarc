@@ -31,6 +31,8 @@ type AppService struct {
 	db *sql.DB
 	// streams maps an in-flight stream id to its context.CancelFunc so it can be aborted.
 	streams sync.Map
+	// wsConns maps an open WebSocket connection id to its live connection handle.
+	wsConns sync.Map
 }
 
 func NewAppService(db *sql.DB) *AppService {
@@ -655,6 +657,18 @@ func buildSnippetModel(request RequestInput) snippetModel {
 		if request.Auth["addTo"] != "query" && request.Auth["key"] != "" {
 			headers = append(headers, Header{Key: resolveVariables(request.Auth["key"], env), Value: resolveVariables(request.Auth["value"], env)})
 		}
+	case "oauth2":
+		if token := resolveVariables(oauthToken(request.Auth), env); token != "" {
+			name := request.Auth["headerName"]
+			if name == "" {
+				name = "Authorization"
+			}
+			prefix := request.Auth["headerPrefix"]
+			if prefix == "" {
+				prefix = "Bearer"
+			}
+			headers = append(headers, Header{Key: name, Value: prefix + " " + token})
+		}
 	}
 
 	hasBody := request.Body != "" && methodAllowsBody(request.Method)
@@ -1041,7 +1055,28 @@ func applyHeaderAuth(req *http.Request, auth map[string]string, variables map[st
 		if auth["addTo"] != "query" && auth["key"] != "" {
 			req.Header.Set(resolveVariables(auth["key"], variables), resolveVariables(auth["value"], variables))
 		}
+	case "oauth2":
+		token := resolveVariables(oauthToken(auth), variables)
+		if token != "" {
+			name := auth["headerName"]
+			if name == "" {
+				name = "Authorization"
+			}
+			prefix := auth["headerPrefix"]
+			if prefix == "" {
+				prefix = "Bearer"
+			}
+			req.Header.Set(name, prefix+" "+token)
+		}
 	}
+}
+
+// oauthToken returns the fetched access token (accessToken, falling back to token).
+func oauthToken(auth map[string]string) string {
+	if auth["accessToken"] != "" {
+		return auth["accessToken"]
+	}
+	return auth["token"]
 }
 
 func methodAllowsBody(method string) bool {
