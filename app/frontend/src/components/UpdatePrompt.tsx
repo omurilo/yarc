@@ -2,25 +2,34 @@ import { Download, RefreshCw, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { checkForUpdate, openReleasePage, performUpdate, type UpdateInfo } from "../services/apiClient";
 
-// Polls GitHub once on launch; when a newer release exists, shows a toast with an "Update" button
-// that downloads + applies the new build in place and relaunches the app.
+// How often to re-check GitHub for a newer release while the app stays open.
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
+
+// Polls GitHub on launch and then every few hours; when a newer release exists, shows a toast with
+// an "Update" button that downloads + applies the new build in place and relaunches the app.
 export function UpdatePrompt() {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissedVersion, setDismissedVersion] = useState("");
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    void checkForUpdate().then((result) => {
-      if (!cancelled && result?.updateAvailable) setInfo(result);
-    });
+    const check = () => {
+      void checkForUpdate().then((result) => {
+        if (!cancelled && result?.updateAvailable) setInfo(result);
+      });
+    };
+    check();
+    const timer = setInterval(check, CHECK_INTERVAL_MS);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, []);
 
-  if (!info || dismissed) return null;
+  // Hide while there's no update or the user dismissed *this* version; a newer release re-surfaces.
+  if (!info || dismissedVersion === info.latestVersion) return null;
 
   const update = async () => {
     setUpdating(true);
@@ -39,7 +48,7 @@ export function UpdatePrompt() {
         <Sparkles size={15} className="text-accent" />
         <span className="text-sm font-medium text-slate-100">Update available</span>
         <span className="text-xs text-slate-500">{info.currentVersion} → {info.latestVersion}</span>
-        <button onClick={() => setDismissed(true)} className="ml-auto grid h-6 w-6 place-items-center rounded text-slate-400 hover:bg-panel hover:text-slate-100">
+        <button onClick={() => setDismissedVersion(info.latestVersion)} className="ml-auto grid h-6 w-6 place-items-center rounded text-slate-400 hover:bg-panel hover:text-slate-100">
           <X size={14} />
         </button>
       </div>

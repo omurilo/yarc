@@ -88,6 +88,26 @@ func (s *AppService) CheckForUpdate() UpdateInfo {
 	return info
 }
 
+// AppInfoData is the static "about" payload shown in Settings.
+type AppInfoData struct {
+	Version   string `json:"version"`
+	Repo      string `json:"repo"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+	GoVersion string `json:"goVersion"`
+}
+
+// AppInfo returns version/build/runtime details for the Settings → About screen.
+func (s *AppService) AppInfo() AppInfoData {
+	return AppInfoData{
+		Version:   Version,
+		Repo:      githubRepo,
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		GoVersion: runtime.Version(),
+	}
+}
+
 // OpenReleasePage opens a URL in the user's default browser.
 func (s *AppService) OpenReleasePage(url string) {
 	if app := application.Get(); app != nil && url != "" {
@@ -114,7 +134,7 @@ func (s *AppService) PerformUpdate() string {
 		return fmt.Sprintf("no auto-updatable build published for %s/%s — use \"Open release\" to download manually", runtime.GOOS, runtime.GOARCH)
 	}
 
-	payload, err := download(ctx, asset.URL)
+	payload, err := downloadAsset(ctx, asset)
 	if err != nil {
 		return "download failed: " + err.Error()
 	}
@@ -164,8 +184,9 @@ func pickAsset(assets []ghAsset) ghAsset {
 	return ghAsset{}
 }
 
-func download(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// downloadAsset fetches a release asset's bytes from its public download URL.
+func downloadAsset(ctx context.Context, asset ghAsset) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.URL, nil)
 	if err != nil {
 		return nil, err
 	}

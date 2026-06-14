@@ -392,6 +392,11 @@ func UpsertEnvironment(db *sql.DB, id string, name string, payload string, activ
 	return err
 }
 
+func DeleteEnvironment(db *sql.DB, id string) error {
+	_, err := db.Exec(`delete from environments where id = ?`, id)
+	return err
+}
+
 func ListEnvironments(db *sql.DB) ([]string, error) {
 	rows, err := db.Query(`select payload_json from environments order by active desc, name asc`)
 	if err != nil {

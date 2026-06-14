@@ -1,6 +1,6 @@
-import { Check, Link2, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { pickEnvFile } from "../services/apiClient";
+import { Check, Download, ExternalLink, Link2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { appInfo, checkForUpdate, openReleasePage, performUpdate, pickEnvFile, type AppInfo, type UpdateInfo } from "../services/apiClient";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 import type { Environment } from "../types/api";
 
@@ -69,8 +69,120 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+
+        <AboutSection />
       </div>
     </div>
+  );
+}
+
+function AboutSection() {
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void appInfo().then(setInfo);
+  }, []);
+
+  const check = async () => {
+    setChecking(true);
+    setError("");
+    const result = await checkForUpdate();
+    setChecking(false);
+    if (!result) {
+      setError("Update check is only available in the desktop app.");
+      return;
+    }
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setUpdate(result);
+  };
+
+  const runUpdate = async () => {
+    setUpdating(true);
+    setError("");
+    const err = await performUpdate();
+    if (err) {
+      setError(err);
+      setUpdating(false);
+    }
+    // On success the app relaunches; if we're still here, it failed.
+  };
+
+  const rows: { label: string; value: string }[] = info
+    ? [
+        { label: "Version", value: info.version },
+        { label: "Platform", value: `${info.os}/${info.arch}` },
+        { label: "Repository", value: info.repo },
+        { label: "Runtime", value: info.goVersion },
+      ]
+    : [];
+
+  return (
+    <section className="mt-6 rounded-lg border border-line bg-panel">
+      <div className="border-b border-line px-4 py-3">
+        <h2 className="text-sm font-semibold text-slate-200">About</h2>
+        <p className="text-xs text-slate-500">Build details and app updates.</p>
+      </div>
+      <div className="grid gap-4 p-4">
+        <div className="flex items-center gap-3">
+          <img src="/logo.svg" alt="Yarc" className="h-12 w-12" draggable={false} />
+          <div>
+            <div className="text-base font-semibold text-slate-100">Yarc</div>
+            <div className="text-xs text-slate-500">Local-first API workspace</div>
+          </div>
+        </div>
+
+        <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
+          {rows.map((row) => (
+            <div key={row.label} className="contents">
+              <dt className="text-slate-500">{row.label}</dt>
+              <dd className="truncate font-mono text-slate-200">{row.value}</dd>
+            </div>
+          ))}
+          {!info && <dd className="col-span-2 text-xs text-slate-500">Desktop build info is only available in the app.</dd>}
+        </dl>
+
+        {update && update.updateAvailable && (
+          <div className="rounded-md border border-accent/40 bg-accent/5 px-3 py-2.5 text-sm">
+            <div className="flex items-center gap-2 text-slate-200">
+              <span className="font-medium text-accent">Update available</span>
+              <span className="text-xs text-slate-400">{update.currentVersion} → {update.latestVersion}</span>
+            </div>
+            {update.notes && <p className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap text-xs leading-5 text-slate-400">{update.notes.slice(0, 600)}</p>}
+          </div>
+        )}
+        {update && !update.updateAvailable && !error && (
+          <div className="text-xs text-slate-500">You're on the latest version ({update.currentVersion}).</div>
+        )}
+        {error && <div className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">{error}</div>}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {update && update.updateAvailable ? (
+            <button onClick={() => void runUpdate()} disabled={updating} className="flex h-9 items-center gap-2 rounded-md bg-accent px-4 text-sm font-semibold text-ink disabled:opacity-60">
+              {updating ? <RefreshCw size={15} className="animate-spin" /> : <Download size={15} />}
+              {updating ? "Updating…" : "Update & restart"}
+            </button>
+          ) : (
+            <button onClick={() => void check()} disabled={checking} className="flex h-9 items-center gap-2 rounded-md border border-line bg-[#14181f] px-4 text-sm text-slate-200 hover:border-accent disabled:opacity-60">
+              {checking ? <RefreshCw size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+              {checking ? "Checking…" : "Check for updates"}
+            </button>
+          )}
+          {update?.url && (
+            <button onClick={() => void openReleasePage(update.url)} className="flex h-9 items-center gap-2 rounded-md border border-line bg-[#14181f] px-4 text-sm text-slate-300 hover:border-accent">
+              <ExternalLink size={15} />
+              Release notes
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 

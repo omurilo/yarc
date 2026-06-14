@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { deleteCollections, saveCollection, saveCollections, saveEnvironment } from "../services/apiClient";
+import { deleteCollections, deleteEnvironment, saveCollection, saveCollections, saveEnvironment } from "../services/apiClient";
 import type { ApiRequest, ApiResponse, CollectionNode, Environment, HistoryEntry, WorkspaceBootstrap } from "../types/api";
 
 const starterRequest: ApiRequest = {
@@ -305,10 +305,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const remaining = get().environments.filter((env) => env.id !== id);
     if (remaining.length === 0) return;
     const activeId = get().activeEnvironmentId === id ? remaining[0].id : get().activeEnvironmentId;
-    set({
-      environments: remaining.map((env) => ({ ...env, active: env.id === activeId })),
-      activeEnvironmentId: activeId,
-    });
+    const next = remaining.map((env) => ({ ...env, active: env.id === activeId }));
+    set({ environments: next, activeEnvironmentId: activeId });
+    void deleteEnvironment(id);
+    // Persist the (possibly) new active flag so it survives a restart too.
+    next.forEach((env) => void saveEnvironment(env));
   },
 }));
 

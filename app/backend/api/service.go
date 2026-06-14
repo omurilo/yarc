@@ -554,6 +554,10 @@ func (s *AppService) SaveEnvironment(env Environment) error {
 	return storage.UpsertEnvironment(s.db, env.ID, env.Name, string(payload), env.Active)
 }
 
+func (s *AppService) DeleteEnvironment(id string) error {
+	return storage.DeleteEnvironment(s.db, id)
+}
+
 func (s *AppService) ListEnvironments() []Environment {
 	payloads, err := storage.ListEnvironments(s.db)
 	if err != nil {

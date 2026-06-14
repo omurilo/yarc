@@ -200,6 +200,12 @@ export async function openBackendWebSocket(url: string, headers: { key: string; 
 
 // ---- Updater ---------------------------------------------------------------
 export type UpdateInfo = { currentVersion: string; latestVersion: string; updateAvailable: boolean; url: string; notes: string; error: string };
+export type AppInfo = { version: string; repo: string; os: string; arch: string; goVersion: string };
+
+export async function appInfo(): Promise<AppInfo | null> {
+  if (wailsService()?.AppInfo) return wailsService()!.AppInfo();
+  return null;
+}
 
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
   if (wailsService()?.CheckForUpdate) return wailsService()!.CheckForUpdate();
@@ -225,6 +231,14 @@ export async function saveEnvironment(environment: Environment): Promise<void> {
   const environments = readLocal<Environment[]>("yarc.environments", defaultEnvironments);
   const next = environments.some((item) => item.id === environment.id) ? environments.map((item) => (item.id === environment.id ? environment : item)) : [...environments, environment];
   localStorage.setItem("yarc.environments", JSON.stringify(next));
+}
+
+export async function deleteEnvironment(id: string): Promise<void> {
+  if (wailsService()?.DeleteEnvironment) {
+    return wailsService()!.DeleteEnvironment(id);
+  }
+  const environments = readLocal<Environment[]>("yarc.environments", defaultEnvironments);
+  localStorage.setItem("yarc.environments", JSON.stringify(environments.filter((item) => item.id !== id)));
 }
 
 // Kept in sync with PROXY_PATH in vite.config.ts. The dev/preview server performs the
