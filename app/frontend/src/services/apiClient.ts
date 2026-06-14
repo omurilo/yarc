@@ -193,6 +193,13 @@ export async function openReleasePage(url: string): Promise<void> {
   if (typeof window !== "undefined") window.open(url, "_blank");
 }
 
+// Downloads the matching build, replaces the running binary, and relaunches. Resolves with an
+// error string ("" on success, just before the app restarts). Desktop only.
+export async function performUpdate(): Promise<string> {
+  if (wailsService()?.PerformUpdate) return wailsService()!.PerformUpdate();
+  return "Auto-update is only available in the desktop app.";
+}
+
 export async function saveEnvironment(environment: Environment): Promise<void> {
   if (wailsService()?.SaveEnvironment) {
     return wailsService()!.SaveEnvironment(environment);

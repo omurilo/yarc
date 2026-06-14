@@ -6,6 +6,7 @@ require (
 	github.com/bufbuild/protocompile v0.14.1
 	github.com/coder/websocket v1.8.14
 	github.com/jhump/protoreflect/v2 v2.0.0-beta.1
+	github.com/minio/selfupdate v0.6.0
 	github.com/wailsapp/wails/v3 v3.0.0-alpha.98-tui
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
@@ -13,6 +14,7 @@ require (
 )
 
 require (
+	aead.dev/minisign v0.2.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect

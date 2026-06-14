@@ -4,6 +4,7 @@ import { CollectionTree } from "../components/CollectionTree";
 import { EnvironmentSwitcher } from "../components/EnvironmentSwitcher";
 import { CookieManager } from "../components/CookieManager";
 import { ImportDialog } from "../components/ImportDialog";
+import { UpdatePrompt } from "../components/UpdatePrompt";
 import { GraphQLPanel } from "../pages/GraphQLPanel";
 import { GrpcPanel } from "../pages/GrpcPanel";
 import { HistoryPanel } from "../pages/HistoryPanel";
@@ -116,6 +117,7 @@ export function AppShell() {
 
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       <CookieManager open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
+      <UpdatePrompt />
     </div>
   );
 }

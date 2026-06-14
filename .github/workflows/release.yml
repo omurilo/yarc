@@ -50,10 +50,14 @@ jobs:
           ln -s /Applications dmgroot/Applications
           hdiutil create -volname "${APP_NAME}" -srcfolder dmgroot -ov -format UDZO \
             "bin/${APP_NAME}-macos-universal.dmg"
+      - name: Archive binary for auto-update
+        run: tar -czf "bin/${APP_NAME}_darwin_universal.tar.gz" -C bin "${APP_NAME}"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: app/bin/${{ env.APP_NAME }}-macos-universal.dmg
+          files: |
+            app/bin/${{ env.APP_NAME }}-macos-universal.dmg
+            app/bin/${{ env.APP_NAME }}_darwin_universal.tar.gz
 
   # ---------------------------------------------------------------- Windows (.exe)
   windows:
@@ -82,10 +86,14 @@ jobs:
         run: wails3 task windows:package
       - name: Rename artifact
         run: Copy-Item "bin/${env:APP_NAME}.exe" "bin/${env:APP_NAME}-windows-amd64.exe"
+      - name: Archive binary for auto-update
+        run: Compress-Archive -Path "bin/${env:APP_NAME}.exe" -DestinationPath "bin/${env:APP_NAME}_windows_amd64.zip"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: app/bin/${{ env.APP_NAME }}-windows-amd64.exe
+          files: |
+            app/bin/${{ env.APP_NAME }}-windows-amd64.exe
+            app/bin/${{ env.APP_NAME }}_windows_amd64.zip
 
   # ---------------------------------------------------------------- Linux (.deb)
   linux:
@@ -145,7 +153,11 @@ jobs:
           Description: A fast, local-first API client for REST, GraphQL, WebSocket, and gRPC.
           EOF
           dpkg-deb --build --root-owner-group "$PKG" "bin/${APP_NAME}-linux-amd64.deb"
+      - name: Archive binary for auto-update
+        run: tar -czf "bin/${APP_NAME}_linux_amd64.tar.gz" -C bin "${APP_NAME}"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: app/bin/${{ env.APP_NAME }}-linux-amd64.deb
+          files: |
+            app/bin/${{ env.APP_NAME }}-linux-amd64.deb
+            app/bin/${{ env.APP_NAME }}_linux_amd64.tar.gz
