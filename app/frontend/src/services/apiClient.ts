@@ -487,9 +487,8 @@ function buildHeaders(request: ApiRequest) {
   if (request.auth.type === "apiKey" && request.auth.addTo !== "query" && request.auth.key) {
     headers[resolveVariables(request.auth.key, request.environment)] = resolveVariables(request.auth.value ?? "", request.environment);
   }
-  const oauthToken = request.auth.accessToken || request.auth.token;
-  if (request.auth.type === "oauth2" && oauthToken) {
-    headers[request.auth.headerName || "Authorization"] = `${request.auth.headerPrefix || "Bearer"} ${resolveVariables(oauthToken, request.environment)}`;
+  if (request.auth.type === "oauth2" && request.auth.accessToken) {
+    headers[request.auth.headerName || "Authorization"] = `${request.auth.headerPrefix || "Bearer"} ${resolveVariables(request.auth.accessToken, request.environment)}`;
   }
   return headers;
 }

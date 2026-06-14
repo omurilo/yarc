@@ -648,7 +648,7 @@ func buildSnippetModel(request RequestInput) snippetModel {
 			if name == "" {
 				name = "Authorization"
 			}
-			headers = append(headers, Header{Key: name, Value: value})
+			headers = append(headers, Header{Key: name, Value: "Bearer " + value})
 		}
 	case "basic":
 		encoded := base64.StdEncoding.EncodeToString([]byte(resolveVariables(request.Auth["username"], env) + ":" + resolveVariables(request.Auth["password"], env)))
@@ -1071,12 +1071,10 @@ func applyHeaderAuth(req *http.Request, auth map[string]string, variables map[st
 	}
 }
 
-// oauthToken returns the fetched access token (accessToken, falling back to token).
+// oauthToken returns the fetched OAuth 2.0 access token. It deliberately does NOT fall back to
+// the bearer "token" field, so a leftover bearer token from a prior auth type can't leak in.
 func oauthToken(auth map[string]string) string {
-	if auth["accessToken"] != "" {
-		return auth["accessToken"]
-	}
-	return auth["token"]
+	return auth["accessToken"]
 }
 
 func methodAllowsBody(method string) bool {
