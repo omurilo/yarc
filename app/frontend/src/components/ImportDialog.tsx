@@ -1,6 +1,8 @@
 import { FileUp, TerminalSquare, X } from "lucide-react";
 import { useState } from "react";
 import { parseCurl } from "../services/curl";
+import { isOpenApi, parseOpenApi } from "../services/openapi";
+import { isPostmanCollection, isPostmanEnvironment, parsePostman, parsePostmanEnvironment } from "../services/postman";
 import { isYaakExport, parseYaak } from "../services/yaak";
 import { useWorkspaceStore } from "../store/useWorkspaceStore";
 import type { CollectionNode } from "../types/api";
@@ -47,6 +49,29 @@ export function ImportDialog({ open, onClose }: Props) {
         return;
       }
 
+      // Postman Collection v2.1.
+      if (isPostmanCollection(parsed)) {
+        importCollections(parsePostman(parsed).collections);
+        onClose();
+        return;
+      }
+
+      // Postman Environment export.
+      if (isPostmanEnvironment(parsed)) {
+        importEnvironments([parsePostmanEnvironment(parsed)]);
+        onClose();
+        return;
+      }
+
+      // OpenAPI 3.x / Swagger 2.0.
+      if (isOpenApi(parsed)) {
+        const { collections } = parseOpenApi(parsed);
+        if (collections.length <= 1) throw new Error("OpenAPI document has no operations to import.");
+        importCollections(collections);
+        onClose();
+        return;
+      }
+
       // Native Yarc collection (array of nodes, or { collections: [...] }).
       const nodes = (Array.isArray(parsed) ? parsed : parsed.collections) as CollectionNode[] | undefined;
       if (!Array.isArray(nodes)) throw new Error("Unrecognized file. Expected a Yarc collection or a Yaak export.");
@@ -81,7 +106,7 @@ export function ImportDialog({ open, onClose }: Props) {
           <div className="mt-3 flex items-center justify-between gap-2">
             <label className="flex h-9 cursor-pointer items-center gap-2 rounded-md border border-line bg-panel px-3 text-xs text-slate-300 hover:border-accent">
               <FileUp size={14} />
-              Import collection · Yarc / Yaak (.json)
+              Import · Yarc / Postman / OpenAPI / Yaak (.json)
               <input type="file" accept="application/json,.json" className="hidden" onChange={(event) => void importJson(event.target.files?.[0])} />
             </label>
             <button onClick={importCurl} disabled={!command.trim()} className="h-9 rounded-md bg-accent px-4 text-sm font-semibold text-ink disabled:opacity-60">
