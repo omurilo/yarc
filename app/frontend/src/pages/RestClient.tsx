@@ -6,7 +6,7 @@ import { FormEditor } from "../components/FormEditor";
 import { HeaderTable } from "../components/HeaderTable";
 import { ResponseViewer } from "../components/ResponseViewer";
 import { SnippetPanel } from "../components/SnippetPanel";
-import { saveResponseFile, streamHttpRequest } from "../services/apiClient";
+import { fetchOAuth2Token, saveResponseFile, streamHttpRequest } from "../services/apiClient";
 import { serializeFormBody, upsertHeader } from "../services/formBody";
 import { mergedVars, runPreRequest, runTests, type EnvBridge, type ScriptOutcome, type TestResult } from "../services/scripting";
 import { folderVariables } from "../services/variableScopes";
@@ -269,8 +269,10 @@ function RequestTabPanel({ activeTab, request, updateRequest }: TabPanelProps) {
               <option value="bearer">Bearer token</option>
               <option value="basic">Basic auth</option>
               <option value="apiKey">API key</option>
+              <option value="oauth2">OAuth 2.0</option>
             </select>
           </label>
+          {request.auth.type === "oauth2" && <OAuth2Auth request={request} updateRequest={updateRequest} />}
           {request.auth.type === "bearer" && (
             <div className="grid grid-cols-[220px_minmax(0,1fr)] gap-3">
               <TextField label="Header name" value={request.auth.headerName ?? "Authorization"} onChange={(headerName) => updateRequest({ auth: { ...request.auth, headerName } })} />
@@ -416,6 +418,87 @@ function TextField({ label, value, onChange, secret = false }: { label: string; 
       {label}
       <input value={value} type={secret ? "password" : "text"} onChange={(event) => onChange(event.target.value)} className="h-9 rounded-md border border-line bg-[#151a21] px-3 text-slate-100 outline-none focus:border-accent" />
     </label>
+  );
+}
+
+function OAuth2Auth({ request, updateRequest }: { request: ApiRequest; updateRequest: (patch: Partial<ApiRequest>) => void }) {
+  const auth = request.auth;
+  const grant = auth.grantType || "client_credentials";
+  const [status, setStatus] = useState<{ kind: "idle" | "ok" | "error"; message: string }>({ kind: "idle", message: "" });
+  const [fetching, setFetching] = useState(false);
+  const set = (patch: Record<string, string>) => updateRequest({ auth: { ...auth, ...patch } });
+
+  const getToken = async () => {
+    setFetching(true);
+    setStatus({ kind: "idle", message: "" });
+    const result = await fetchOAuth2Token({
+      grantType: grant,
+      tokenUrl: auth.tokenUrl ?? "",
+      clientId: auth.clientId ?? "",
+      clientSecret: auth.clientSecret ?? "",
+      scope: auth.scope ?? "",
+      username: auth.username ?? "",
+      password: auth.password ?? "",
+      refreshToken: auth.refreshToken ?? "",
+      clientAuth: auth.clientAuth ?? "body",
+    });
+    setFetching(false);
+    if (result.error) {
+      setStatus({ kind: "error", message: result.error });
+      return;
+    }
+    set({ accessToken: result.accessToken, ...(result.refreshToken ? { refreshToken: result.refreshToken } : {}) });
+    setStatus({ kind: "ok", message: `Token acquired${result.expiresIn ? ` · expires in ${result.expiresIn}s` : ""}` });
+  };
+
+  return (
+    <div className="grid gap-3">
+      <div className="grid grid-cols-[220px_minmax(0,1fr)] gap-3">
+        <label className="grid gap-1 text-sm text-slate-400">
+          Grant type
+          <select value={grant} onChange={(event) => set({ grantType: event.target.value })} className="h-9 rounded-md border border-line bg-panel px-3 text-slate-100 outline-none focus:border-accent">
+            <option value="client_credentials">Client Credentials</option>
+            <option value="password">Password</option>
+            <option value="refresh_token">Refresh Token</option>
+          </select>
+        </label>
+        <TextField label="Token URL" value={auth.tokenUrl ?? ""} onChange={(tokenUrl) => set({ tokenUrl })} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <TextField label="Client ID" value={auth.clientId ?? ""} onChange={(clientId) => set({ clientId })} />
+        <TextField label="Client secret" value={auth.clientSecret ?? ""} onChange={(clientSecret) => set({ clientSecret })} secret />
+      </div>
+      {grant === "password" && (
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="Username" value={auth.username ?? ""} onChange={(username) => set({ username })} />
+          <TextField label="Password" value={auth.password ?? ""} onChange={(password) => set({ password })} secret />
+        </div>
+      )}
+      {grant === "refresh_token" && <TextField label="Refresh token" value={auth.refreshToken ?? ""} onChange={(refreshToken) => set({ refreshToken })} secret />}
+      <div className="grid grid-cols-[1fr_220px] gap-3">
+        <TextField label="Scope" value={auth.scope ?? ""} onChange={(scope) => set({ scope })} />
+        <label className="grid gap-1 text-sm text-slate-400">
+          Client auth
+          <select value={auth.clientAuth ?? "body"} onChange={(event) => set({ clientAuth: event.target.value })} className="h-9 rounded-md border border-line bg-panel px-3 text-slate-100 outline-none focus:border-accent">
+            <option value="body">In body</option>
+            <option value="basic">Basic header</option>
+          </select>
+        </label>
+      </div>
+      <div className="flex items-center gap-3">
+        <button onClick={() => void getToken()} disabled={!auth.tokenUrl || fetching} className="h-9 rounded-md bg-accent px-4 text-sm font-semibold text-ink disabled:opacity-50">
+          {fetching ? "Requesting…" : "Get token"}
+        </button>
+        {status.kind === "ok" && <span className="text-xs text-accent">{status.message}</span>}
+        {status.kind === "error" && <span className="text-xs text-danger">{status.message}</span>}
+      </div>
+      {auth.accessToken && (
+        <label className="grid gap-1 text-sm text-slate-400">
+          Access token (sent as {auth.headerPrefix || "Bearer"})
+          <textarea readOnly value={auth.accessToken} className="h-16 resize-none rounded-md border border-line bg-[#14181f] px-3 py-2 font-mono text-xs text-slate-200 outline-none" />
+        </label>
+      )}
+    </div>
   );
 }
 

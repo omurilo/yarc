@@ -88,6 +88,8 @@ function buildModel(request: ApiRequest): SnippetModel {
     headers.push({ key: "Authorization", value: `Basic ${encoded}` });
   } else if (auth.type === "apiKey" && auth.addTo !== "query" && auth.key) {
     headers.push({ key: resolveVars(auth.key, env), value: resolveVars(auth.value ?? "", env) });
+  } else if (auth.type === "oauth2" && (auth.accessToken || auth.token)) {
+    headers.push({ key: auth.headerName || "Authorization", value: `${auth.headerPrefix || "Bearer"} ${resolveVars(auth.accessToken || auth.token, env)}` });
   }
 
   const hasBody = Boolean(request.body) && methodsWithBody.has(request.method);

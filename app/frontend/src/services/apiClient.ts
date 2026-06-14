@@ -106,6 +106,93 @@ export async function clearCookies(domain: string): Promise<void> {
   if (wailsService()?.ClearCookies) return wailsService()!.ClearCookies(domain);
 }
 
+// ---- OAuth 2.0 -------------------------------------------------------------
+export type OAuth2Config = {
+  grantType: string;
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scope: string;
+  username: string;
+  password: string;
+  refreshToken: string;
+  clientAuth: string;
+};
+export type OAuth2TokenResult = { accessToken: string; tokenType: string; expiresIn: number; refreshToken: string; raw: string; error: string };
+
+export async function fetchOAuth2Token(config: OAuth2Config): Promise<OAuth2TokenResult> {
+  if (wailsService()?.FetchOAuth2Token) return wailsService()!.FetchOAuth2Token(config);
+  // Browser preview: POST the form through the relay (token endpoints often block CORS directly).
+  const form = new URLSearchParams();
+  form.set("grant_type", config.grantType || "client_credentials");
+  if (config.scope) form.set("scope", config.scope);
+  if (config.grantType === "password") {
+    form.set("username", config.username);
+    form.set("password", config.password);
+  } else if (config.grantType === "refresh_token") {
+    form.set("refresh_token", config.refreshToken);
+  }
+  const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" };
+  if (config.clientAuth === "basic") headers.Authorization = `Basic ${btoa(`${config.clientId}:${config.clientSecret}`)}`;
+  else {
+    if (config.clientId) form.set("client_id", config.clientId);
+    if (config.clientSecret) form.set("client_secret", config.clientSecret);
+  }
+  const result = await relayRequest({ url: config.tokenUrl, method: "POST", headers, body: form.toString() });
+  if (result.error) return { accessToken: "", tokenType: "", expiresIn: 0, refreshToken: "", raw: "", error: result.error };
+  try {
+    const json = JSON.parse(result.body);
+    if (!json.access_token) return { accessToken: "", tokenType: "", expiresIn: 0, refreshToken: "", raw: result.body, error: json.error_description || json.error || "No access_token in response" };
+    return { accessToken: json.access_token, tokenType: json.token_type ?? "", expiresIn: json.expires_in ?? 0, refreshToken: json.refresh_token ?? "", raw: result.body, error: "" };
+  } catch {
+    return { accessToken: "", tokenType: "", expiresIn: 0, refreshToken: "", raw: result.body, error: "Token response was not JSON" };
+  }
+}
+
+// ---- WebSocket (desktop backend; supports custom headers) ------------------
+export type WsHandlers = { onOpen: (status: string) => void; onMessage: (data: string) => void; onClose: (reason: string) => void; onError: (error: string) => void };
+export type WsController = { send: (payload: string) => void; close: () => void };
+
+// Opens a WebSocket through the Go backend (custom headers work, unlike the browser's native
+// WebSocket). Returns null in the browser preview so the panel can fall back to native WebSocket.
+export async function openBackendWebSocket(url: string, headers: { key: string; value: string; enabled: boolean }[], handlers: WsHandlers): Promise<WsController | null> {
+  if (!inWails) return null;
+  const id = crypto.randomUUID();
+  const base = `yarc:ws:${id}`;
+  const offs: Array<() => void> = [];
+  offs.push(Events.On(`${base}:open`, (event: { data: any }) => handlers.onOpen(event.data?.status ?? "")));
+  offs.push(Events.On(`${base}:message`, (event: { data: any }) => handlers.onMessage(typeof event.data === "string" ? event.data : String(event.data ?? ""))));
+  offs.push(
+    Events.On(`${base}:close`, (event: { data: any }) => {
+      handlers.onClose(event.data?.reason ?? "");
+      offs.forEach((off) => off());
+    }),
+  );
+  const error: string = await (AppService as any).OpenWebSocket(id, url, headers);
+  if (error) {
+    offs.forEach((off) => off());
+    handlers.onError(error);
+    return null;
+  }
+  return {
+    send: (payload: string) => void (AppService as any).SendWebSocket(id, payload),
+    close: () => void (AppService as any).CloseWebSocket(id),
+  };
+}
+
+// ---- Updater ---------------------------------------------------------------
+export type UpdateInfo = { currentVersion: string; latestVersion: string; updateAvailable: boolean; url: string; notes: string; error: string };
+
+export async function checkForUpdate(): Promise<UpdateInfo | null> {
+  if (wailsService()?.CheckForUpdate) return wailsService()!.CheckForUpdate();
+  return null;
+}
+
+export async function openReleasePage(url: string): Promise<void> {
+  if (wailsService()?.OpenReleasePage) return wailsService()!.OpenReleasePage(url);
+  if (typeof window !== "undefined") window.open(url, "_blank");
+}
+
 export async function saveEnvironment(environment: Environment): Promise<void> {
   if (wailsService()?.SaveEnvironment) {
     return wailsService()!.SaveEnvironment(environment);
@@ -392,6 +479,10 @@ function buildHeaders(request: ApiRequest) {
   }
   if (request.auth.type === "apiKey" && request.auth.addTo !== "query" && request.auth.key) {
     headers[resolveVariables(request.auth.key, request.environment)] = resolveVariables(request.auth.value ?? "", request.environment);
+  }
+  const oauthToken = request.auth.accessToken || request.auth.token;
+  if (request.auth.type === "oauth2" && oauthToken) {
+    headers[request.auth.headerName || "Authorization"] = `${request.auth.headerPrefix || "Bearer"} ${resolveVariables(oauthToken, request.environment)}`;
   }
   return headers;
 }
