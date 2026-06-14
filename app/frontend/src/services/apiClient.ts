@@ -149,6 +149,24 @@ export async function fetchOAuth2Token(config: OAuth2Config): Promise<OAuth2Toke
   }
 }
 
+export type OAuth2AuthCodeConfig = {
+  authUrl: string;
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scope: string;
+  redirectUrl: string;
+  clientAuth: string;
+  usePkce: boolean;
+};
+
+// Authorization Code grant. Desktop-only: it opens the consent page in the browser and runs a
+// loopback callback server to capture the code. Returns an error in the browser preview.
+export async function authorizeOAuth2(config: OAuth2AuthCodeConfig): Promise<OAuth2TokenResult> {
+  if (wailsService()?.AuthorizeOAuth2) return wailsService()!.AuthorizeOAuth2(config);
+  return { accessToken: "", tokenType: "", expiresIn: 0, refreshToken: "", raw: "", error: "Authorization Code flow requires the desktop app (browser redirect + loopback server)." };
+}
+
 // ---- WebSocket (desktop backend; supports custom headers) ------------------
 export type WsHandlers = { onOpen: (status: string) => void; onMessage: (data: string) => void; onClose: (reason: string) => void; onError: (error: string) => void };
 export type WsController = { send: (payload: string) => void; close: () => void };

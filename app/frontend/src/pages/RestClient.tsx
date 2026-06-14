@@ -6,7 +6,7 @@ import { FormEditor } from "../components/FormEditor";
 import { HeaderTable } from "../components/HeaderTable";
 import { ResponseViewer } from "../components/ResponseViewer";
 import { SnippetPanel } from "../components/SnippetPanel";
-import { fetchOAuth2Token, saveResponseFile, streamHttpRequest } from "../services/apiClient";
+import { authorizeOAuth2, fetchOAuth2Token, saveResponseFile, streamHttpRequest } from "../services/apiClient";
 import { serializeFormBody, upsertHeader } from "../services/formBody";
 import { mergedVars, runPreRequest, runTests, type EnvBridge, type ScriptOutcome, type TestResult } from "../services/scripting";
 import { folderVariables } from "../services/variableScopes";
@@ -412,11 +412,11 @@ function RequestTabPanel({ activeTab, request, updateRequest }: TabPanelProps) {
   );
 }
 
-function TextField({ label, value, onChange, secret = false }: { label: string; value: string; onChange: (value: string) => void; secret?: boolean }) {
+function TextField({ label, value, onChange, secret = false, placeholder }: { label: string; value: string; onChange: (value: string) => void; secret?: boolean; placeholder?: string }) {
   return (
     <label className="grid gap-1 text-sm text-slate-400">
       {label}
-      <input value={value} type={secret ? "password" : "text"} onChange={(event) => onChange(event.target.value)} className="h-9 rounded-md border border-line bg-[#151a21] px-3 text-slate-100 outline-none focus:border-accent" />
+      <input value={value} type={secret ? "password" : "text"} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="h-9 rounded-md border border-line bg-[#151a21] px-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-accent" />
     </label>
   );
 }
@@ -430,18 +430,30 @@ function OAuth2Auth({ request, updateRequest }: { request: ApiRequest; updateReq
 
   const getToken = async () => {
     setFetching(true);
-    setStatus({ kind: "idle", message: "" });
-    const result = await fetchOAuth2Token({
-      grantType: grant,
-      tokenUrl: auth.tokenUrl ?? "",
-      clientId: auth.clientId ?? "",
-      clientSecret: auth.clientSecret ?? "",
-      scope: auth.scope ?? "",
-      username: auth.username ?? "",
-      password: auth.password ?? "",
-      refreshToken: auth.refreshToken ?? "",
-      clientAuth: auth.clientAuth ?? "body",
-    });
+    setStatus({ kind: grant === "authorization_code" ? "ok" : "idle", message: grant === "authorization_code" ? "Waiting for browser authorization…" : "" });
+    const result =
+      grant === "authorization_code"
+        ? await authorizeOAuth2({
+            authUrl: auth.authUrl ?? "",
+            tokenUrl: auth.tokenUrl ?? "",
+            clientId: auth.clientId ?? "",
+            clientSecret: auth.clientSecret ?? "",
+            scope: auth.scope ?? "",
+            redirectUrl: auth.redirectUrl ?? "",
+            clientAuth: auth.clientAuth ?? "body",
+            usePkce: auth.usePkce === "true",
+          })
+        : await fetchOAuth2Token({
+            grantType: grant,
+            tokenUrl: auth.tokenUrl ?? "",
+            clientId: auth.clientId ?? "",
+            clientSecret: auth.clientSecret ?? "",
+            scope: auth.scope ?? "",
+            username: auth.username ?? "",
+            password: auth.password ?? "",
+            refreshToken: auth.refreshToken ?? "",
+            clientAuth: auth.clientAuth ?? "body",
+          });
     setFetching(false);
     if (result.error) {
       setStatus({ kind: "error", message: result.error });
@@ -451,12 +463,15 @@ function OAuth2Auth({ request, updateRequest }: { request: ApiRequest; updateReq
     setStatus({ kind: "ok", message: `Token acquired${result.expiresIn ? ` · expires in ${result.expiresIn}s` : ""}` });
   };
 
+  const canGetToken = grant === "authorization_code" ? Boolean(auth.authUrl && auth.tokenUrl) : Boolean(auth.tokenUrl);
+
   return (
     <div className="grid gap-3">
       <div className="grid grid-cols-[220px_minmax(0,1fr)] gap-3">
         <label className="grid gap-1 text-sm text-slate-400">
           Grant type
           <select value={grant} onChange={(event) => set({ grantType: event.target.value })} className="h-9 rounded-md border border-line bg-panel px-3 text-slate-100 outline-none focus:border-accent">
+            <option value="authorization_code">Authorization Code</option>
             <option value="client_credentials">Client Credentials</option>
             <option value="password">Password</option>
             <option value="refresh_token">Refresh Token</option>
@@ -464,6 +479,18 @@ function OAuth2Auth({ request, updateRequest }: { request: ApiRequest; updateReq
         </label>
         <TextField label="Token URL" value={auth.tokenUrl ?? ""} onChange={(tokenUrl) => set({ tokenUrl })} />
       </div>
+      {grant === "authorization_code" && (
+        <>
+          <TextField label="Authorization URL" value={auth.authUrl ?? ""} onChange={(authUrl) => set({ authUrl })} />
+          <div className="grid grid-cols-[1fr_auto] items-end gap-3">
+            <TextField label="Redirect URL (must be registered)" value={auth.redirectUrl ?? ""} onChange={(redirectUrl) => set({ redirectUrl })} placeholder="http://127.0.0.1:8089/callback" />
+            <label className="flex h-9 cursor-pointer items-center gap-2 rounded-md border border-line bg-panel px-3 text-sm text-slate-300">
+              <input type="checkbox" checked={auth.usePkce === "true"} onChange={(event) => set({ usePkce: event.target.checked ? "true" : "false" })} className="h-4 w-4 accent-accent" />
+              PKCE (S256)
+            </label>
+          </div>
+        </>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <TextField label="Client ID" value={auth.clientId ?? ""} onChange={(clientId) => set({ clientId })} />
         <TextField label="Client secret" value={auth.clientSecret ?? ""} onChange={(clientSecret) => set({ clientSecret })} secret />
@@ -486,8 +513,8 @@ function OAuth2Auth({ request, updateRequest }: { request: ApiRequest; updateReq
         </label>
       </div>
       <div className="flex items-center gap-3">
-        <button onClick={() => void getToken()} disabled={!auth.tokenUrl || fetching} className="h-9 rounded-md bg-accent px-4 text-sm font-semibold text-ink disabled:opacity-50">
-          {fetching ? "Requesting…" : "Get token"}
+        <button onClick={() => void getToken()} disabled={!canGetToken || fetching} className="h-9 rounded-md bg-accent px-4 text-sm font-semibold text-ink disabled:opacity-50">
+          {fetching ? (grant === "authorization_code" ? "Authorizing…" : "Requesting…") : grant === "authorization_code" ? "Authorize" : "Get token"}
         </button>
         {status.kind === "ok" && <span className="text-xs text-accent">{status.message}</span>}
         {status.kind === "error" && <span className="text-xs text-danger">{status.message}</span>}
