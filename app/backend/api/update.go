@@ -23,7 +23,7 @@ import (
 )
 
 // Version is the current app version. Keep in sync with build/config.yml.
-const Version = "0.1.0"
+const Version = "1.0.1"
 
 // githubRepo is the "owner/repo" whose GitHub Releases drive the updater.
 const githubRepo = "omurilo/yarc"
