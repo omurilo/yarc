@@ -15,6 +15,8 @@ const starterRequest: ApiRequest = {
   tests: "",
   environment: {},
   timeoutMs: 30000,
+  followRedirects: true,
+  verifySSL: true,
 };
 
 type WorkspaceState = {

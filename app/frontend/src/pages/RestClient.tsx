@@ -14,7 +14,7 @@ import { useWorkspaceStore } from "../store/useWorkspaceStore";
 import type { ApiRequest, ApiResponse, HttpMethod } from "../types/api";
 
 const methods: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-const tabs = ["Params", "Headers", "Auth", "Body", "Tests"] as const;
+const tabs = ["Params", "Headers", "Auth", "Body", "Tests", "Settings"] as const;
 type RequestTab = (typeof tabs)[number];
 
 export function RestClient() {
@@ -331,6 +331,40 @@ function RequestTabPanel({ activeTab, request, updateRequest }: TabPanelProps) {
     );
   }
 
+  if (activeTab === "Settings") {
+    const followRedirects = request.followRedirects !== false;
+    const verifySSL = request.verifySSL !== false;
+    return (
+      <div className="h-full min-h-0 overflow-auto p-4">
+        <div className="grid max-w-2xl gap-3">
+          <SettingToggle
+            label="Follow redirects"
+            hint="Follow 3xx Location responses automatically."
+            checked={followRedirects}
+            onChange={(value) => updateRequest({ followRedirects: value })}
+          />
+          <SettingToggle
+            label="Verify TLS certificate"
+            hint="Disable to allow self-signed / invalid certificates."
+            checked={verifySSL}
+            onChange={(value) => updateRequest({ verifySSL: value })}
+          />
+          <label className="grid max-w-xs gap-1 text-sm text-slate-400">
+            Request timeout (ms)
+            <input
+              type="number"
+              min={0}
+              value={request.timeoutMs}
+              onChange={(event) => updateRequest({ timeoutMs: Number(event.target.value) || 0 })}
+              className="h-9 rounded-md border border-line bg-[#151a21] px-3 text-slate-100 outline-none focus:border-accent"
+            />
+            <span className="text-xs text-slate-600">0 = no timeout (waits until the server closes the connection).</span>
+          </label>
+        </div>
+      </div>
+    );
+  }
+
   const isForm = request.bodyType === "form" || request.bodyType === "multipart";
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -385,10 +419,23 @@ function TextField({ label, value, onChange, secret = false }: { label: string; 
   );
 }
 
+function SettingToggle({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-4 rounded-md border border-line bg-panel px-3 py-2.5">
+      <span className="grid gap-0.5">
+        <span className="text-sm text-slate-200">{label}</span>
+        <span className="text-xs text-slate-500">{hint}</span>
+      </span>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-accent" />
+    </label>
+  );
+}
+
 function tabCount(tab: RequestTab, request: ApiRequest) {
   if (tab === "Params") return request.queryParams.length;
   if (tab === "Headers") return request.headers.length;
   if (tab === "Auth") return request.auth.type && request.auth.type !== "none" ? 1 : 0;
   if (tab === "Body") return request.body ? 1 : 0;
-  return request.tests ? 1 : 0;
+  if (tab === "Tests") return request.preRequestScript?.trim() || request.tests?.trim() ? 1 : 0;
+  return 0;
 }

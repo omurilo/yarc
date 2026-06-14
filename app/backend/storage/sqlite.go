@@ -37,7 +37,79 @@ func Open(path string) (*sql.DB, error) {
 	_ = ensureColumn(db, "collections", "request_json", "text")
 	_ = ensureColumn(db, "collections", "variables_json", "text")
 
+	if _, err := db.Exec(cookieSchema); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	return db, nil
+}
+
+const cookieSchema = `create table if not exists cookies (
+	domain text not null,
+	path text not null,
+	name text not null,
+	value text,
+	expires text,
+	secure integer,
+	http_only integer,
+	primary key (domain, path, name)
+);`
+
+type StoredCookie struct {
+	Domain   string
+	Path     string
+	Name     string
+	Value    string
+	Expires  string
+	Secure   bool
+	HTTPOnly bool
+}
+
+func UpsertCookie(db *sql.DB, c StoredCookie) error {
+	if c.Path == "" {
+		c.Path = "/"
+	}
+	_, err := db.Exec(
+		`insert into cookies (domain, path, name, value, expires, secure, http_only)
+		 values (?, ?, ?, ?, ?, ?, ?)
+		 on conflict(domain, path, name) do update set
+			value = excluded.value, expires = excluded.expires, secure = excluded.secure, http_only = excluded.http_only`,
+		c.Domain, c.Path, c.Name, c.Value, c.Expires, c.Secure, c.HTTPOnly,
+	)
+	return err
+}
+
+func ListCookies(db *sql.DB) ([]StoredCookie, error) {
+	rows, err := db.Query(`select domain, path, name, value, coalesce(expires, ''), secure, http_only from cookies order by domain, path, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cookies := []StoredCookie{}
+	for rows.Next() {
+		var c StoredCookie
+		if err := rows.Scan(&c.Domain, &c.Path, &c.Name, &c.Value, &c.Expires, &c.Secure, &c.HTTPOnly); err != nil {
+			return nil, err
+		}
+		cookies = append(cookies, c)
+	}
+	return cookies, rows.Err()
+}
+
+func DeleteCookie(db *sql.DB, domain, path, name string) error {
+	_, err := db.Exec(`delete from cookies where domain = ? and path = ? and name = ?`, domain, path, name)
+	return err
+}
+
+// ClearCookies removes all cookies, or only those for a domain when domain != "".
+func ClearCookies(db *sql.DB, domain string) error {
+	if domain == "" {
+		_, err := db.Exec(`delete from cookies`)
+		return err
+	}
+	_, err := db.Exec(`delete from cookies where domain = ?`, domain)
+	return err
 }
 
 type StoredHistory struct {

@@ -1,4 +1,4 @@
-import type { ApiRequest, ApiResponse, CollectionNode, Environment, GrpcInvokeResponse, GrpcMethodList, GrpcRequest, HistoryEntry, SentRequestInfo, WorkspaceBootstrap } from "../types/api";
+import type { ApiRequest, ApiResponse, CollectionNode, Cookie, Environment, GrpcInvokeResponse, GrpcMethodList, GrpcRequest, HistoryEntry, SentRequestInfo, WorkspaceBootstrap } from "../types/api";
 // Wails v3 exposes Go services as generated ES module bindings (not the v2 `window.go`).
 // They only work inside the Wails webview, where the page is served from the wails:// origin.
 import { AppService } from "../../bindings/github.com/omurilo/yarc/app/backend/api";
@@ -85,6 +85,25 @@ export async function saveResponseFile(name: string, content: string, mime = "ap
   }
   downloadFile(name, content, mime);
   return true;
+}
+
+// Cookie jar (desktop only). The Go backend auto-attaches matching cookies to requests and
+// stores Set-Cookie responses; these power the manual cookie manager. No-ops in the browser.
+export async function listCookies(): Promise<Cookie[]> {
+  if (wailsService()?.ListCookies) return wailsService()!.ListCookies();
+  return [];
+}
+
+export async function saveCookie(cookie: Cookie): Promise<void> {
+  if (wailsService()?.SaveCookie) return wailsService()!.SaveCookie(cookie);
+}
+
+export async function deleteCookie(domain: string, path: string, name: string): Promise<void> {
+  if (wailsService()?.DeleteCookie) return wailsService()!.DeleteCookie(domain, path, name);
+}
+
+export async function clearCookies(domain: string): Promise<void> {
+  if (wailsService()?.ClearCookies) return wailsService()!.ClearCookies(domain);
 }
 
 export async function saveEnvironment(environment: Environment): Promise<void> {

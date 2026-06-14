@@ -30,6 +30,8 @@ export type ApiRequest = {
   tests: string;
   environment: Record<string, { text: string; type: string; fileName?: string; }>;
   timeoutMs: number;
+  followRedirects?: boolean;
+  verifySSL?: boolean;
 };
 
 export type ApiResponse = {
@@ -43,6 +45,16 @@ export type ApiResponse = {
   error?: string;
   resolvedUrl: string;
   sent?: SentRequestInfo;
+};
+
+export type Cookie = {
+  domain: string;
+  path: string;
+  name: string;
+  value: string;
+  expires: string;
+  secure: boolean;
+  httpOnly: boolean;
 };
 
 export type SentRequestInfo = {

@@ -1,7 +1,8 @@
-import { Activity, Boxes, Braces, Clock3, Download, GitBranch, RadioTower, Search, Settings, TerminalSquare, Upload } from "lucide-react";
+import { Activity, Boxes, Braces, Clock3, Cookie, Download, GitBranch, RadioTower, Search, Settings, TerminalSquare, Upload } from "lucide-react";
 import { useState } from "react";
 import { CollectionTree } from "../components/CollectionTree";
 import { EnvironmentSwitcher } from "../components/EnvironmentSwitcher";
+import { CookieManager } from "../components/CookieManager";
 import { ImportDialog } from "../components/ImportDialog";
 import { GraphQLPanel } from "../pages/GraphQLPanel";
 import { GrpcPanel } from "../pages/GrpcPanel";
@@ -28,6 +29,7 @@ export function AppShell() {
   const setCommandOpen = useWorkspaceStore((state) => state.setCommandOpen);
   const collections = useWorkspaceStore((state) => state.collections);
   const [importOpen, setImportOpen] = useState(false);
+  const [cookiesOpen, setCookiesOpen] = useState(false);
 
   const exportWorkspace = () => {
     const payload = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), collections }, null, 2);
@@ -54,6 +56,13 @@ export function AppShell() {
           })}
         </div>
         <div className="flex flex-col gap-2">
+          <button
+            className="grid h-10 w-10 place-items-center rounded-md text-slate-400 transition hover:bg-panel hover:text-slate-100"
+            title="Cookies"
+            onClick={() => setCookiesOpen(true)}
+          >
+            <Cookie size={18} />
+          </button>
           <button
             className={`grid h-10 w-10 place-items-center rounded-md transition ${activeView === "settings" ? "bg-panel text-accent shadow-focus" : "text-slate-400 hover:bg-panel hover:text-slate-100"}`}
             title="Settings"
@@ -106,6 +115,7 @@ export function AppShell() {
       </main>
 
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <CookieManager open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
     </div>
   );
 }

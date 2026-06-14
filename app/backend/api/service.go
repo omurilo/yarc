@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	crand "crypto/rand"
 	"database/sql"
 	"encoding/base64"
@@ -102,6 +103,135 @@ func sentRequestFrom(req *http.Request, sentBody string) *SentRequest {
 	return &SentRequest{Method: req.Method, URL: req.URL.String(), Headers: headers, Body: sentBody}
 }
 
+// clientFor builds an HTTP client honoring the request's network settings. Defaults (nil
+// pointers) follow redirects and verify TLS. A new client per request keeps settings isolated.
+func clientFor(input RequestInput) *http.Client {
+	follow := input.FollowRedirects == nil || *input.FollowRedirects
+	verify := input.VerifySSL == nil || *input.VerifySSL
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyFromEnvironment,
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: !verify},
+		},
+	}
+	if !follow {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	return client
+}
+
+// ListCookies / SaveCookie / DeleteCookie / ClearCookies back the cookie manager UI.
+func (s *AppService) ListCookies() []Cookie {
+	stored, err := storage.ListCookies(s.db)
+	if err != nil {
+		return []Cookie{}
+	}
+	cookies := make([]Cookie, 0, len(stored))
+	for _, c := range stored {
+		cookies = append(cookies, Cookie{Domain: c.Domain, Path: c.Path, Name: c.Name, Value: c.Value, Expires: c.Expires, Secure: c.Secure, HTTPOnly: c.HTTPOnly})
+	}
+	return cookies
+}
+
+func (s *AppService) SaveCookie(c Cookie) error {
+	return storage.UpsertCookie(s.db, storage.StoredCookie{Domain: c.Domain, Path: c.Path, Name: c.Name, Value: c.Value, Expires: c.Expires, Secure: c.Secure, HTTPOnly: c.HTTPOnly})
+}
+
+func (s *AppService) DeleteCookie(domain, path, name string) error {
+	return storage.DeleteCookie(s.db, domain, path, name)
+}
+
+func (s *AppService) ClearCookies(domain string) error {
+	return storage.ClearCookies(s.db, domain)
+}
+
+// attachCookies adds stored cookies that match the request URL to the Cookie header. User-set
+// cookies (an existing Cookie header) win on name conflicts.
+func (s *AppService) attachCookies(req *http.Request) {
+	stored, err := storage.ListCookies(s.db)
+	if err != nil || len(stored) == 0 {
+		return
+	}
+	host := req.URL.Hostname()
+	reqPath := req.URL.Path
+	if reqPath == "" {
+		reqPath = "/"
+	}
+	now := time.Now()
+
+	pairs := map[string]string{}
+	order := []string{}
+	add := func(name, value string) {
+		if _, seen := pairs[name]; !seen {
+			order = append(order, name)
+		}
+		pairs[name] = value
+	}
+	// Seed with any user-provided cookies so they take precedence.
+	for _, existing := range req.Cookies() {
+		add(existing.Name, existing.Value)
+	}
+	for _, c := range stored {
+		if !cookieDomainMatch(host, c.Domain) || !strings.HasPrefix(reqPath, normalizeCookiePath(c.Path)) {
+			continue
+		}
+		if c.Secure && req.URL.Scheme != "https" {
+			continue
+		}
+		if c.Expires != "" {
+			if exp, perr := time.Parse(time.RFC3339, c.Expires); perr == nil && exp.Before(now) {
+				continue
+			}
+		}
+		if _, userSet := pairs[c.Name]; userSet {
+			continue
+		}
+		add(c.Name, c.Value)
+	}
+	if len(order) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		parts = append(parts, name+"="+pairs[name])
+	}
+	req.Header.Set("Cookie", strings.Join(parts, "; "))
+}
+
+// storeResponseCookies persists Set-Cookie headers from a response (delete on Max-Age<0).
+func (s *AppService) storeResponseCookies(reqURL *url.URL, cookies []*http.Cookie) {
+	for _, c := range cookies {
+		domain := strings.TrimPrefix(c.Domain, ".")
+		if domain == "" {
+			domain = reqURL.Hostname()
+		}
+		path := normalizeCookiePath(c.Path)
+		if c.MaxAge < 0 {
+			_ = storage.DeleteCookie(s.db, domain, path, c.Name)
+			continue
+		}
+		expires := ""
+		if !c.Expires.IsZero() {
+			expires = c.Expires.UTC().Format(time.RFC3339)
+		} else if c.MaxAge > 0 {
+			expires = time.Now().Add(time.Duration(c.MaxAge) * time.Second).UTC().Format(time.RFC3339)
+		}
+		_ = storage.UpsertCookie(s.db, storage.StoredCookie{Domain: domain, Path: path, Name: c.Name, Value: c.Value, Expires: expires, Secure: c.Secure, HTTPOnly: c.HttpOnly})
+	}
+}
+
+func normalizeCookiePath(path string) string {
+	if path == "" {
+		return "/"
+	}
+	return path
+}
+
+func cookieDomainMatch(host, domain string) bool {
+	domain = strings.TrimPrefix(domain, ".")
+	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
 func headerMap(header http.Header) map[string]string {
 	out := make(map[string]string, len(header))
 	for key, values := range header {
@@ -120,15 +250,17 @@ func (s *AppService) ExecuteHTTPRequest(input RequestInput) ResponseOutput {
 	if err != nil {
 		return errorResponse(err, start, resolvedURL)
 	}
+	s.attachCookies(req)
 	sent := sentRequestFrom(req, sentBody)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := clientFor(input).Do(req)
 	if err != nil {
 		out := errorResponse(err, start, resolvedURL)
 		out.Sent = sent
 		return out
 	}
 	defer resp.Body.Close()
+	s.storeResponseCookies(req.URL, resp.Cookies())
 
 	responseBody, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
@@ -185,14 +317,16 @@ func (s *AppService) ExecuteHTTPStream(streamID string, input RequestInput) {
 		emit("done", map[string]any{"error": err.Error(), "resolvedUrl": resolvedURL, "durationMs": time.Since(start).Milliseconds()})
 		return
 	}
+	s.attachCookies(req)
 	sent := sentRequestFrom(req, sentBody)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := clientFor(input).Do(req)
 	if err != nil {
 		emit("done", map[string]any{"error": err.Error(), "resolvedUrl": resolvedURL, "durationMs": time.Since(start).Milliseconds(), "sent": sent})
 		return
 	}
 	defer resp.Body.Close()
+	s.storeResponseCookies(req.URL, resp.Cookies())
 
 	emit("meta", map[string]any{
 		"statusCode":  resp.StatusCode,

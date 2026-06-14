@@ -50,11 +50,25 @@ type RequestInput struct {
 	Tests            string                      `json:"tests"`
 	Environment      map[string]EnvironmentValue `json:"environment"`
 	TimeoutMS        int                         `json:"timeoutMs"`
+	// Network settings. Pointers so a missing value means "use the safe default" (follow
+	// redirects, verify TLS) rather than Go's zero value of false.
+	FollowRedirects *bool `json:"followRedirects,omitempty"`
+	VerifySSL       *bool `json:"verifySSL,omitempty"`
 }
 
 type FilePick struct {
 	Path string `json:"path"`
 	Name string `json:"name"`
+}
+
+type Cookie struct {
+	Domain   string `json:"domain"`
+	Path     string `json:"path"`
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	Expires  string `json:"expires"`
+	Secure   bool   `json:"secure"`
+	HTTPOnly bool   `json:"httpOnly"`
 }
 
 type SentRequest struct {
