@@ -150,10 +150,13 @@ func (s *AppService) PerformUpdate() string {
 		return "update failed: " + err.Error()
 	}
 
-	// Relaunch on a short delay so this binding call can return first, then quit.
+	if err := relaunch(); err != nil {
+		return "relaunch failed: " + err.Error()
+	}
+
+	// Give this binding call a moment to resolve before quitting the current process.
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		_ = relaunch()
 		if app := application.Get(); app != nil {
 			app.Quit()
 		}
@@ -252,7 +255,9 @@ func extractBinary(name string, payload []byte) ([]byte, error) {
 }
 
 // relaunch starts a fresh instance of the app after the binary has been replaced. On macOS it
-// re-signs the (modified) .app bundle ad-hoc and opens it; elsewhere it re-execs the binary.
+// re-signs the modified .app bundle and asks Launch Services to open a new instance. If `open`
+// runs while the current app instance is still alive, it may only activate that instance; schedule
+// it through a detached shell so the actual open happens after this process exits.
 func relaunch() error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -261,7 +266,7 @@ func relaunch() error {
 	if runtime.GOOS == "darwin" {
 		if app := appBundle(exe); app != "" {
 			_ = exec.Command("codesign", "--force", "--deep", "--sign", "-", app).Run()
-			return exec.Command("open", app).Start()
+			return exec.Command("sh", "-c", "sleep 1; open -n \"$1\"", "yarc-relaunch", app).Start()
 		}
 	}
 	cmd := exec.Command(exe)
